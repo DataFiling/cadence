@@ -1,5 +1,8 @@
 {
-  "name": "app-builder-workspace",
+  "name": "cadence",
+  "version": "0.1.0",
+  "description": "Local music desk for the browser and the desktop.",
+  "author": "DataFiling",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -9,6 +12,13 @@
   "scripts": {
     "dev": "node scripts/with-app-env.mjs vite dev --host 0.0.0.0 --port 8080",
     "build": "node scripts/with-app-env.mjs vite build && npm run db:migrate",
+    "build:desktop": "node scripts/with-app-env.mjs vite build --config vite.desktop.config.ts",
+    "desktop": "electron desktop/main.cjs",
+    "desktop:dev": "CADENCE_DEV_URL=http://127.0.0.1:8080 electron desktop/main.cjs",
+    "dist": "npm run build:desktop && electron-builder --linux zip --win zip --mac zip",
+    "dist:linux": "npm run build:desktop && electron-builder --linux zip AppImage",
+    "dist:win": "npm run build:desktop && electron-builder --win zip",
+    "dist:mac": "npm run build:desktop && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac zip",
     "db:migrate": "node scripts/migrate.mjs",
     "build:dev": "node scripts/with-app-env.mjs vite build --mode development",
     "preview": "node scripts/with-app-env.mjs vite preview",
@@ -79,6 +89,8 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12",
     "@eslint/js": "^9.20.0",
     "@types/node": "^22.16.5",
     "@types/pg": "^8.11.10",
@@ -93,5 +105,40 @@
     "playwright": "^1.62.0",
     "prettier": "^3.4.0",
     "typescript-eslint": "^8.56.1"
+  },
+  "main": "desktop/main.cjs",
+  "build": {
+    "appId": "com.datafiling.cadence",
+    "productName": "CADENCE",
+    "asar": true,
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "desktop/build"
+    },
+    "files": [
+      "desktop/main.cjs",
+      "desktop-dist/**/*",
+      "!node_modules/**"
+    ],
+    "linux": {
+      "artifactName": "CADENCE-${version}-linux.${ext}",
+      "target": ["zip", "AppImage"],
+      "category": "AudioVideo",
+      "synopsis": "Local music desk",
+      "desktopName": "cadence.desktop",
+      "syncDesktopName": true
+    },
+    "win": {
+      "artifactName": "CADENCE-${version}-win.${ext}",
+      "target": ["zip"]
+    },
+    "mac": {
+      "artifactName": "CADENCE-${version}-mac.${ext}",
+      "target": ["zip"],
+      "category": "public.app-category.music",
+      "identity": null
+    }
   }
 }

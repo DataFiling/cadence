@@ -20,3 +20,20 @@ npm run dev
 ```
 
 The dev server listens on port 8080.
+
+## Desktop (Windows, Linux, Mac)
+
+The desk also packages as a desktop app with Electron. Archives are unsigned zip builds, so they compile on any of the three systems:
+
+```bash
+npm install
+npm run dist:linux   # zip + AppImage
+npm run dist:win     # zip
+npm run dist:mac     # zip
+npm run dist         # all three
+```
+
+Output lands in `release/`. `npm run desktop` opens the packaged UI after `npm run build:desktop`. `npm run desktop:dev` opens a window on the local dev server.
+
+Mac and Windows archives do not need that OS to compile. A signed Mac disk image or a Windows installer (NSIS) still has to be made on that platform.
+

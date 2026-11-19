@@ -31,6 +31,8 @@
   },
   "include": [
     "src",
-    "server"
+    "server",
+    "desktop/renderer.tsx",
+    "vite.desktop.config.ts"
   ]
 }
