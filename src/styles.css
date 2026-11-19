@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --color-bg: #14120f;
+  --color-panel: #221f1a;
+  --color-raised: #2e2923;
+  --color-fg: #f3ece2;
+  --color-muted: #a39888;
+  --color-copper: #e07840;
+  --color-line: #3d362e;
+  --color-lcd: #100e0c;
+}
+
+[data-finish="brass"] {
+  --color-bg: #16130e;
+  --color-panel: #261f16;
+  --color-raised: #342a1c;
+  --color-copper: #d4a054;
+  --color-line: #4a3c28;
+  --color-lcd: #120e09;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  [role="slider"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html,
+  body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    min-height: 100%;
+  }
+
+  body {
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, color-mix(in oklab, var(--color-copper) 16%, transparent), transparent 55%),
+      linear-gradient(180deg, color-mix(in oklab, var(--color-fg) 4%, transparent), transparent 28%);
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-copper) 45%, transparent);
+    color: var(--color-fg);
+  }
+}
+
+input[type="range"].seek,
+input[type="range"].vol {
+  accent-color: var(--color-copper);
+  width: 100%;
+  height: 1.75rem;
+}
+
+input[type="search"] {
+  background: var(--color-lcd);
+  color: var(--color-fg);
+}
+
+input[type="search"]::placeholder {
+  color: var(--color-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track {
+    animation: none !important;
+  }
+}
