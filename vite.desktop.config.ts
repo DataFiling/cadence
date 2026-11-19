@@ -15,6 +15,12 @@ export default defineConfig({
     tsconfigPaths: true,
     alias: { "@": resolve("src") },
   },
+  optimizeDeps: {
+    exclude: ["@ffmpeg/ffmpeg", "@ffmpeg/util"],
+  },
+  worker: {
+    format: "es",
+  },
   build: {
     outDir: resolve("desktop-dist"),
     emptyOutDir: true,

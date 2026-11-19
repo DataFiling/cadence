@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { deleteTrack, getTrackBlob, listTracks, putTrack } from "./db";
 import { makeDemos } from "./demos";
 import { engine } from "./engine";
+import { convertToWav, type LibraryActivity } from "./ffmpeg";
 import {
   describePlaybackFailure,
   isAudioCandidate,
@@ -39,6 +40,7 @@ type DeskState = {
   query: string;
   ready: boolean;
   busy: boolean;
+  activity: LibraryActivity | null;
   error: string | null;
   hydrate: () => Promise<void>;
   addFiles: (files: File[]) => Promise<void>;
@@ -146,6 +148,7 @@ export const useDesk = create<DeskState>((set, get) => {
     query: "",
     ready: false,
     busy: false,
+    activity: null,
     error: null,
 
     hydrate: () => {
@@ -200,31 +203,52 @@ export const useDesk = create<DeskState>((set, get) => {
     addFiles: async (files) => {
       const audioFiles = files.filter((file) => isAudioCandidate(file));
       if (audioFiles.length === 0) {
-        set({ error: "Drop audio files — mp3, wav, ogg, flac, m4a." });
+        set({ error: "Drop audio files — mp3, wav, ogg, flac, m4a.", activity: null });
         return;
       }
-      set({ busy: true, error: null });
+      set({ busy: true, error: null, activity: null });
+      let converterBroken = false;
       try {
-        const accepted: { file: File; duration: number }[] = [];
+        const accepted: { file: File; duration: number; title: string }[] = [];
         const rejected: string[] = [];
         for (const file of audioFiles) {
           const probed = await engine.probe(file);
-          if (probed.ok) accepted.push({ file, duration: probed.duration });
-          else rejected.push(file.name);
+          const title = stripExt(file.name);
+          if (probed.ok) {
+            accepted.push({ file, duration: probed.duration, title });
+            continue;
+          }
+          if (converterBroken) {
+            rejected.push(file.name);
+            continue;
+          }
+          const converted = await convertToWav(file, (activity) => set({ activity }));
+          if (!converted.ok) {
+            rejected.push(file.name);
+            if (converted.fatal) converterBroken = true;
+            continue;
+          }
+          const wav = new File([converted.blob], `${title || "audio"}.wav`, { type: "audio/wav" });
+          const again = await engine.probe(wav);
+          if (!again.ok) {
+            rejected.push(file.name);
+            continue;
+          }
+          accepted.push({ file: wav, duration: again.duration, title });
         }
         let added = Date.now();
-        for (const { file, duration } of accepted) {
+        for (const item of accepted) {
           await putTrack({
             id: crypto.randomUUID(),
-            title: stripExt(file.name),
-            duration,
+            title: item.title,
+            duration: item.duration,
             added: added++,
-            blob: file,
+            blob: item.file,
           });
         }
         const rejection = rejected.length > 0 ? unsupportedFilesMessage(rejected) : null;
         if (accepted.length === 0) {
-          set({ busy: false, error: rejection });
+          set({ error: rejection });
           return;
         }
         const tracks = await listTracks();
@@ -233,14 +257,14 @@ export const useDesk = create<DeskState>((set, get) => {
         set({
           tracks,
           order: shuffle ? shuffleIds(ids, currentId) : ids,
-          busy: false,
           error: rejection,
         });
       } catch (err) {
         set({
-          busy: false,
           error: err instanceof Error ? err.message : "Could not add those files.",
         });
+      } finally {
+        set({ busy: false, activity: null });
       }
     },
 

@@ -1,0 +1,16 @@
+CADENCE ships a single-thread FFmpeg WebAssembly core built from:
+
+- FFmpeg n5.1.4 (LGPL-2.1-or-later)
+  https://github.com/FFmpeg/FFmpeg/releases/tag/n5.1.4
+- ffmpeg.wasm v0.12.10 glue (bindings MIT, fftools under FFmpeg's LGPL)
+  https://github.com/ffmpegwasm/ffmpeg.wasm/tree/v0.12.10
+- Emscripten 3.1.40
+
+Configure flags include --disable-gpl, --disable-nonfree, and --disable-postproc.
+No GPL libraries are linked (no libx264, libx265, libxvid, or libpostproc).
+The only encoder is pcm_s16le and the only muxer is WAV.
+
+The native H.264 decoder still contains the words "x264" in SEI messages and
+codec fourccs. That is not the GPL libx264 encoder, which is not linked.
+
+Rebuild with scripts/build-ffmpeg-lgpl.sh. The license text is COPYING.LGPLv2.1.
