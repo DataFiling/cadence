@@ -6,41 +6,23 @@ import {
   MEDIA_ERR_NETWORK,
   MEDIA_ERR_SRC_NOT_SUPPORTED,
   describePlaybackFailure,
-  isAudioCandidate,
   mediaTypeCandidates,
   playbackFailureMessage,
   unsupportedFilesMessage,
   verdictFromCanPlayType,
 } from "./playback.ts";
 
-describe("isAudioCandidate", () => {
-  it("accepts audio mime types and known extensions", () => {
-    assert.equal(isAudioCandidate({ name: "a.MP3", type: "" }), true);
-    assert.equal(isAudioCandidate({ name: "a.bin", type: "audio/flac" }), true);
-    assert.equal(isAudioCandidate({ name: "notes.txt", type: "text/plain" }), false);
-    assert.equal(isAudioCandidate({ name: "cover.png", type: "image/png" }), false);
-  });
-});
-
 describe("mediaTypeCandidates", () => {
-  it("adds aliases canPlayType understands", () => {
-    assert.deepEqual(mediaTypeCandidates("song.flac", "audio/x-flac"), [
-      "audio/x-flac",
-      "audio/flac",
-    ]);
-    assert.deepEqual(mediaTypeCandidates("voice.opus", ""), [
-      "audio/ogg; codecs=opus",
-      "audio/webm; codecs=opus",
-    ]);
-    assert.deepEqual(mediaTypeCandidates("take.wav", "audio/wave"), [
-      "audio/wave",
-      "audio/wav",
-      "audio/x-wav",
-    ]);
-  });
-
-  it("keeps an unsupported mime so the fast check can reject it", () => {
-    assert.deepEqual(mediaTypeCandidates("clip.wma", "audio/x-ms-wma"), ["audio/x-ms-wma"]);
+  it("uses the shared codec list, including aliases canPlayType understands", () => {
+    const flac = mediaTypeCandidates("song.flac", "audio/x-flac");
+    assert.ok(flac.includes("audio/x-flac"));
+    assert.ok(flac.includes("audio/flac"));
+    const opus = mediaTypeCandidates("voice.opus", "");
+    assert.ok(opus.includes("audio/ogg; codecs=opus"));
+    const wav = mediaTypeCandidates("take.wav", "audio/wave");
+    assert.ok(wav.includes("audio/wave"));
+    assert.ok(wav.includes("audio/wav"));
+    assert.ok(mediaTypeCandidates("clip.wma", "audio/x-ms-wma").includes("audio/x-ms-wma"));
   });
 });
 

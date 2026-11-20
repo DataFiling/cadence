@@ -2,10 +2,10 @@ import { create } from "zustand";
 import { deleteTrack, getTrackBlob, listTracks, putTrack } from "./db";
 import { makeDemos } from "./demos";
 import { engine } from "./engine";
+import { matchFormat, playableFormats, unknownFormatMessage } from "./codecs";
 import { convertToWav, type LibraryActivity } from "./ffmpeg";
 import {
   describePlaybackFailure,
-  isAudioCandidate,
   playbackFailureMessage,
   unsupportedFilesMessage,
 } from "./playback";
@@ -201,21 +201,29 @@ export const useDesk = create<DeskState>((set, get) => {
     },
 
     addFiles: async (files) => {
-      const audioFiles = files.filter((file) => isAudioCandidate(file));
+      const formats = playableFormats();
+      const audioFiles = files.filter((file) => matchFormat(file, formats));
+      const unknown = files.filter((file) => !matchFormat(file, formats));
       if (audioFiles.length === 0) {
-        set({ error: "Drop audio files — mp3, wav, ogg, flac, m4a.", activity: null });
+        set({
+          error:
+            unknown.length > 0
+              ? unknownFormatMessage(unknown)
+              : "Drop a file in a format this player can use.",
+          activity: null,
+        });
         return;
       }
       set({ busy: true, error: null, activity: null });
       let converterBroken = false;
       try {
-        const accepted: { file: File; duration: number; title: string }[] = [];
+        const accepted: { file: File; duration: number; title: string; converted: boolean }[] = [];
         const rejected: string[] = [];
         for (const file of audioFiles) {
           const probed = await engine.probe(file);
           const title = stripExt(file.name);
           if (probed.ok) {
-            accepted.push({ file, duration: probed.duration, title });
+            accepted.push({ file, duration: probed.duration, title, converted: false });
             continue;
           }
           if (converterBroken) {
@@ -234,7 +242,7 @@ export const useDesk = create<DeskState>((set, get) => {
             rejected.push(file.name);
             continue;
           }
-          accepted.push({ file: wav, duration: again.duration, title });
+          accepted.push({ file: wav, duration: again.duration, title, converted: true });
         }
         let added = Date.now();
         for (const item of accepted) {
@@ -243,10 +251,15 @@ export const useDesk = create<DeskState>((set, get) => {
             title: item.title,
             duration: item.duration,
             added: added++,
+            converted: item.converted,
             blob: item.file,
           });
         }
-        const rejection = rejected.length > 0 ? unsupportedFilesMessage(rejected) : null;
+        const parts = [
+          unknown.length > 0 ? unknownFormatMessage(unknown) : null,
+          rejected.length > 0 ? unsupportedFilesMessage(rejected) : null,
+        ].filter((part): part is string => Boolean(part));
+        const rejection = parts.length > 0 ? parts.join(" ") : null;
         if (accepted.length === 0) {
           set({ error: rejection });
           return;

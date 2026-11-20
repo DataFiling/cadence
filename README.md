@@ -8,7 +8,7 @@ Audio files stay in this browser (IndexedDB). Nothing is uploaded.
 
 ## Play
 
-- Drop audio onto the desk, or use the upload button. mp3, wav, ogg, flac, m4a play directly. Anything the browser cannot decode is converted on this machine to 16-bit WAV and then added under the original name.
+- Drop audio onto the desk, or use the upload button. The desk lists every format it can use. **Native** formats play directly. **FFmpeg** formats are converted on this machine to 16-bit WAV and added under the original name. A converted track is marked in the playlist. Anything outside that list is refused, and the message names the format.
 - Three short original pieces are generated the first time the library is empty.
 - Space plays and pauses. Arrow keys seek; shift-arrows change tracks. Up and down change volume. `M` mutes, `S` shuffles, `R` cycles repeat.
 
@@ -36,6 +36,31 @@ npm run dist         # all three
 Output lands in `release/`. `npm run desktop` opens the packaged UI after `npm run build:desktop`. `npm run desktop:dev` opens a window on the local dev server.
 
 Mac and Windows archives do not need that OS to compile. A signed Mac disk image or a Windows installer (NSIS) still has to be made on that platform.
+
+## Supported formats
+
+The desk builds one list at startup. A format is **native** when this browser's `HTMLAudioElement.canPlayType` or `MediaSource.isTypeSupported` accepts one of its MIME types. Every other format in the list is **converted through FFmpeg** before it is stored. The FFmpeg side is not a guess: it is the audio demuxers enabled in the bundled LGPL build, and only when at least one of that container's audio decoders is enabled too. The per-file decode check still decides whether a particular file can be added.
+
+In Chromium, including the desktop build, these play natively:
+
+- AAC (`.aac`)
+- FLAC (`.flac`)
+- M4A (`.m4a`, `.m4b`, `.mp4`, `.mov`)
+- MP3 (`.mp3`, `.mp2`, `.m2a`, `.mpa`)
+- Ogg (`.ogg`, `.oga`, `.opus`, `.spx`)
+- WAV (`.wav`)
+- WebM (`.webm`, `.mka`)
+
+These are converted with FFmpeg:
+
+- AC-3 (`.ac3`), E-AC-3 (`.eac3`), TrueHD (`.thd`), MLP (`.mlp`)
+- AIFF (`.aiff`, `.aif`, `.aifc`), AU (`.au`), CAF (`.caf`), WAV64 (`.w64`)
+- AMR (`.amr`), GSM (`.gsm`), G.722 (`.g722`), G.723.1, G.729, iLBC
+- APE (`.ape`), WavPack (`.wv`), TTA (`.tta`), Shorten (`.shn`), TAK (`.tak`)
+- WMA (`.wma`, `.asf`)
+- aptX, aptX HD, SBC, ADX, HCA, DFPWM, DSD (`.wsd`), OMA, AST, VOC, Westwood AUD, and Asterisk raw PCM (`.sln`)
+
+Other browsers can move a format between the two columns. A file that matches neither column is refused, and the message names that format.
 
 ## FFmpeg
 

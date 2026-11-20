@@ -28,11 +28,12 @@ export async function listTracks(): Promise<TrackMeta[]> {
   const db = await openDb();
   const rows = await reqToPromise(db.transaction(STORE, "readonly").objectStore(STORE).getAll());
   db.close();
-  const tracks = (rows as StoredTrack[]).map(({ id, title, duration, added }) => ({
+  const tracks = (rows as StoredTrack[]).map(({ id, title, duration, added, converted }) => ({
     id,
     title,
     duration,
     added,
+    converted: Boolean(converted),
   }));
   tracks.sort((a, b) => a.added - b.added);
   return tracks;

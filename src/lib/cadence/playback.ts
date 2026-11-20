@@ -1,3 +1,5 @@
+import { mimeCandidatesFor } from "./codecs.ts";
+
 /** How the desk's media element classifies a failed play(). */
 export type PlaybackFailureKind =
   "blocked" | "unsupported" | "decode" | "network" | "interrupted" | "unknown";
@@ -9,42 +11,6 @@ export const MEDIA_ERR_NETWORK = 2;
 export const MEDIA_ERR_DECODE = 3;
 export const MEDIA_ERR_SRC_NOT_SUPPORTED = 4;
 
-const AUDIO_NAME = /\.(mp3|wav|ogg|flac|m4a|aac|webm|opus)$/i;
-
-/** Types the media element actually answers for each extension we accept. */
-const EXTENSION_TYPES: Record<string, readonly string[]> = {
-  mp3: ["audio/mpeg"],
-  wav: ["audio/wav", "audio/x-wav"],
-  ogg: ["audio/ogg", "audio/ogg; codecs=vorbis"],
-  flac: ["audio/flac"],
-  m4a: ["audio/mp4", "audio/mp4; codecs=mp4a.40.2", "audio/x-m4a"],
-  aac: ["audio/aac", "audio/mp4; codecs=mp4a.40.2"],
-  webm: ["audio/webm", "audio/webm; codecs=opus"],
-  opus: ["audio/ogg; codecs=opus", "audio/webm; codecs=opus"],
-};
-
-/**
- * canPlayType is picky about aliases (`audio/x-flac` is "", `audio/flac` is
- * "probably"). Asking the alias as well keeps the fast check from rejecting a
- * file the element can still decode.
- */
-const MIME_ALIASES: Record<string, readonly string[]> = {
-  "audio/mp3": ["audio/mpeg"],
-  "audio/mpeg": ["audio/mp3"],
-  "audio/wave": ["audio/wav", "audio/x-wav"],
-  "audio/wav": ["audio/x-wav"],
-  "audio/x-wav": ["audio/wav"],
-  "audio/x-flac": ["audio/flac"],
-  "audio/flac": ["audio/x-flac"],
-  "audio/m4a": ["audio/mp4", "audio/mp4; codecs=mp4a.40.2", "audio/x-m4a"],
-  "audio/x-m4a": ["audio/mp4", "audio/mp4; codecs=mp4a.40.2"],
-  "audio/mp4": ["audio/mp4; codecs=mp4a.40.2", "audio/x-m4a"],
-  "audio/opus": ["audio/ogg; codecs=opus", "audio/webm; codecs=opus"],
-  "audio/ogg": ["audio/ogg; codecs=vorbis", "audio/ogg; codecs=opus"],
-  "audio/webm": ["audio/webm; codecs=opus"],
-  "audio/aac": ["audio/mp4; codecs=mp4a.40.2"],
-};
-
 export class PlaybackFailure extends Error {
   readonly kind: PlaybackFailureKind;
 
@@ -55,29 +21,11 @@ export class PlaybackFailure extends Error {
   }
 }
 
-export function isAudioCandidate(file: { name: string; type: string }): boolean {
-  return file.type.toLowerCase().startsWith("audio/") || AUDIO_NAME.test(file.name);
-}
-
+/** MIME types to ask canPlayType about, from the shared codec list. */
 export function mediaTypeCandidates(name: string, mime: string): string[] {
-  const types: string[] = [];
-  const add = (type: string | undefined) => {
-    if (!type) return;
-    const value = type.trim().toLowerCase();
-    if (!value.startsWith("audio/") || types.includes(value)) return;
-    types.push(value);
-  };
-
-  const raw = mime.trim().toLowerCase();
-  const base = raw.split(";")[0]?.trim() ?? "";
-  add(raw);
-  if (base !== raw) add(base);
-  for (const alias of MIME_ALIASES[base] ?? []) add(alias);
-
-  const dot = name.lastIndexOf(".");
-  const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
-  for (const type of EXTENSION_TYPES[ext] ?? []) add(type);
-  return types;
+  return mimeCandidatesFor(name, mime).filter(
+    (type) => type.startsWith("audio/") || type.startsWith("application/ogg"),
+  );
 }
 
 export type CanPlayVerdict = "playable" | "unplayable" | "unknown";

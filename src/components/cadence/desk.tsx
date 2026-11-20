@@ -13,6 +13,7 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
+import { acceptAttribute, playableFormats, type PlayableFormat } from "@/lib/cadence/codecs";
 import { engine } from "@/lib/cadence/engine";
 import { useDesk } from "@/lib/cadence/store";
 import { BAND_LABELS, BANDS, PRESETS, formatTime, type Finish } from "@/lib/cadence/types";
@@ -39,11 +40,17 @@ export function Desk() {
   const toggleShuffle = useDesk((s) => s.toggleShuffle);
   const cycleRepeat = useDesk((s) => s.cycleRepeat);
   const [dragOver, setDragOver] = useState(false);
+  const [formats, setFormats] = useState<PlayableFormat[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const accept = acceptAttribute(playableFormats(() => false));
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    setFormats(playableFormats());
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -133,13 +140,14 @@ export function Desk() {
             : "Files stay in this browser. Space plays. Arrows seek and set volume."}
         </p>
       )}
+      <FormatList formats={formats} />
       {error ? <p className="text-sm text-copper">{error}</p> : null}
       {!ready ? <p className="text-sm text-muted">Opening the desk…</p> : null}
 
       <input
         ref={fileRef}
         type="file"
-        accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a,.aac,.webm,.opus"
+        accept={accept}
         multiple
         className="hidden"
         onChange={(event) => {
@@ -149,6 +157,32 @@ export function Desk() {
         }}
       />
     </main>
+  );
+}
+
+function FormatList({ formats }: { formats: PlayableFormat[] | null }) {
+  if (!formats) {
+    return (
+      <p className="font-mono text-xs text-muted">Checking which formats this browser can play…</p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="font-mono text-xs tracking-[0.18em] text-muted">PLAYABLE</p>
+      <ul className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+        {formats.map((format) => (
+          <li
+            key={format.id}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-panel px-2.5 text-xs"
+          >
+            <span>{format.label}</span>
+            <span className="font-mono text-[10px] uppercase tracking-wide text-copper">
+              {format.via === "native" ? "native" : "FFmpeg"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -479,7 +513,7 @@ function Playlist() {
       {shown.length === 0 ? (
         <p className="px-1 py-6 text-sm text-muted">
           {tracks.length === 0
-            ? "Drop audio onto the desk, or use the upload button."
+            ? "Drop a playable file onto the desk, or use the upload button."
             : "Nothing matches that filter."}
         </p>
       ) : (
@@ -498,6 +532,11 @@ function Playlist() {
                 >
                   <span className="w-6 font-mono text-xs text-muted">{index + 1}</span>
                   <span className="min-w-0 flex-1 truncate">{track.title}</span>
+                  {track.converted ? (
+                    <span className="font-mono text-[10px] uppercase tracking-wide text-copper">
+                      FFmpeg
+                    </span>
+                  ) : null}
                   <span className="font-mono text-xs text-muted">{formatTime(track.duration)}</span>
                 </button>
                 <button
