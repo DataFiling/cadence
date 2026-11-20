@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  ChevronDown,
+  Minus,
   Pause,
   Play,
   Repeat,
@@ -16,6 +18,32 @@ import {
 import { engine } from "@/lib/cadence/engine";
 import { useDesk } from "@/lib/cadence/store";
 import { BAND_LABELS, BANDS, PRESETS, formatTime, type Finish } from "@/lib/cadence/types";
+
+const PANES_KEY = "cadence-panes";
+
+type Panes = {
+  eq: boolean;
+  pl: boolean;
+  shadeMain: boolean;
+  shadeEq: boolean;
+  shadePl: boolean;
+};
+
+function loadPanes(): Panes {
+  const base: Panes = { eq: true, pl: true, shadeMain: false, shadeEq: false, shadePl: false };
+  try {
+    const raw = JSON.parse(localStorage.getItem(PANES_KEY) || "") as Partial<Panes>;
+    return {
+      eq: raw.eq !== false,
+      pl: raw.pl !== false,
+      shadeMain: Boolean(raw.shadeMain),
+      shadeEq: Boolean(raw.shadeEq),
+      shadePl: Boolean(raw.shadePl),
+    };
+  } catch {
+    return base;
+  }
+}
 
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
@@ -38,11 +66,35 @@ export function Desk() {
   const toggleShuffle = useDesk((s) => s.toggleShuffle);
   const cycleRepeat = useDesk((s) => s.cycleRepeat);
   const [dragOver, setDragOver] = useState(false);
+  const [panes, setPanes] = useState<Panes>({ eq: true, pl: true, shadeMain: false, shadeEq: false, shadePl: false });
+  const panesLoaded = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    setPanes(loadPanes());
+    panesLoaded.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!panesLoaded.current) return;
+    localStorage.setItem(PANES_KEY, JSON.stringify(panes));
+  }, [panes]);
+
+  function patch(nextPanes: Partial<Panes>) {
+    setPanes((current) => ({ ...current, ...nextPanes }));
+  }
+
+  function toggleEq() {
+    setPanes((current) => ({ ...current, eq: !current.eq, shadeEq: current.eq ? current.shadeEq : false }));
+  }
+
+  function togglePl() {
+    setPanes((current) => ({ ...current, pl: !current.pl, shadePl: current.pl ? current.shadePl : false }));
+  }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -70,6 +122,10 @@ export function Desk() {
         toggleShuffle();
       } else if (event.key === "r") {
         cycleRepeat();
+      } else if (event.key === "e") {
+        toggleEq();
+      } else if (event.key === "p") {
+        togglePl();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -78,7 +134,7 @@ export function Desk() {
 
   return (
     <main
-      className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-4 px-3 py-4 md:px-6 md:py-8"
+      className="mx-auto flex h-dvh w-full max-w-[30rem] flex-col overflow-hidden px-2 py-3 sm:px-4 sm:py-6"
       onDragOver={(event) => {
         event.preventDefault();
         setDragOver(true);
@@ -90,29 +146,51 @@ export function Desk() {
         void addFiles([...event.dataTransfer.files]);
       }}
     >
-      <header className="flex items-end justify-between gap-3">
-        <div>
-          <p className="font-mono text-xs tracking-[0.22em] text-copper">DESK</p>
-          <h1 className="text-3xl font-semibold tracking-tight">CADENCE</h1>
-        </div>
-        <FinishToggle />
-      </header>
+      <div className={`flex min-h-0 flex-1 flex-col gap-1 overflow-hidden rounded-md bg-lcd p-1 ${dragOver ? "outline outline-2 outline-offset-2 outline-copper" : ""}`}>
+        <Compartment
+          title="CADENCE"
+          shaded={panes.shadeMain}
+          onToggleShade={() => patch({ shadeMain: !panes.shadeMain })}
+          extra={<FinishToggle />}
+        >
+          <Transport
+            eqOpen={panes.eq}
+            plOpen={panes.pl}
+            onToggleEq={toggleEq}
+            onTogglePl={togglePl}
+            onOpen={() => fileRef.current?.click()}
+          />
+        </Compartment>
 
-      <div
-        className={`grid min-w-0 gap-3 md:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.8fr)] ${dragOver ? "outline outline-2 outline-offset-4 outline-copper" : ""}`}
-      >
-        <div className="flex min-w-0 flex-col gap-3">
-          <Transport onOpen={() => fileRef.current?.click()} />
-          <Equalizer />
-        </div>
-        <Playlist />
+        {panes.eq ? (
+          <Compartment
+            title="EQUALIZER"
+            shaded={panes.shadeEq}
+            onToggleShade={() => patch({ shadeEq: !panes.shadeEq })}
+            onClose={() => patch({ eq: false })}
+          >
+            <Equalizer />
+          </Compartment>
+        ) : null}
+
+        {panes.pl ? (
+          <Compartment
+            title="PLAYLIST"
+            shaded={panes.shadePl}
+            onToggleShade={() => patch({ shadePl: !panes.shadePl })}
+            onClose={() => patch({ pl: false })}
+            className={panes.shadePl ? "" : "min-h-0 flex-1"}
+          >
+            <Playlist />
+          </Compartment>
+        ) : null}
       </div>
 
-      <p className="font-mono text-xs text-muted">
-        {busy ? "Working the library…" : "Files stay in this browser. Space plays. Arrows seek and set volume."}
+      <p className="mt-2 shrink-0 font-mono text-xs text-muted">
+        {busy ? "Working the library…" : "EQ and PL open their own windows. Double-click a bar to shade it."}
       </p>
-      {error ? <p className="text-sm text-copper">{error}</p> : null}
-      {!ready ? <p className="text-sm text-muted">Opening the desk…</p> : null}
+      {error ? <p className="mt-1 text-sm text-copper">{error}</p> : null}
+      {!ready ? <p className="mt-1 text-sm text-muted">Opening the desk…</p> : null}
 
       <input
         ref={fileRef}
@@ -130,19 +208,75 @@ export function Desk() {
   );
 }
 
+function Compartment({
+  title,
+  shaded,
+  onToggleShade,
+  onClose,
+  extra,
+  className,
+  children,
+}: {
+  title: string;
+  shaded: boolean;
+  onToggleShade: () => void;
+  onClose?: () => void;
+  extra?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className={`flex min-h-0 min-w-0 flex-col border border-line bg-panel ${className ?? ""}`}>
+      <header
+        className="flex h-8 shrink-0 select-none items-center gap-2 border-b border-line bg-raised px-2"
+        onDoubleClick={onToggleShade}
+      >
+        <span className="size-2 shrink-0 rounded-full bg-copper" aria-hidden />
+        <h2 className="font-mono text-[11px] tracking-[0.18em] text-muted">{title}</h2>
+        {extra}
+        <div className="ml-auto flex items-center">
+          <button
+            type="button"
+            aria-label={shaded ? `Expand ${title}` : `Shade ${title}`}
+            title={shaded ? "Expand" : "Shade"}
+            onClick={onToggleShade}
+            onDoubleClick={(event) => event.stopPropagation()}
+            className="inline-flex h-8 w-8 items-center justify-center text-muted"
+          >
+            {shaded ? <ChevronDown className="size-3.5" /> : <Minus className="size-3.5" />}
+          </button>
+          {onClose ? (
+            <button
+              type="button"
+              aria-label={`Close ${title}`}
+              title="Close"
+              onClick={onClose}
+              onDoubleClick={(event) => event.stopPropagation()}
+              className="inline-flex h-8 w-8 items-center justify-center text-muted"
+            >
+              <X className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
+      </header>
+      {shaded ? null : <div className="flex min-h-0 flex-1 flex-col p-3">{children}</div>}
+    </section>
+  );
+}
+
 function FinishToggle() {
   const finish = useDesk((s) => s.finish);
   const setFinish = useDesk((s) => s.setFinish);
   const options: Finish[] = ["carbon", "brass"];
   return (
-    <div className="flex rounded-full border border-line bg-panel p-1">
+    <div className="flex" onDoubleClick={(event) => event.stopPropagation()}>
       {options.map((option) => (
         <button
           key={option}
           type="button"
           aria-pressed={finish === option}
           onClick={() => setFinish(option)}
-          className={`min-h-11 rounded-full px-4 text-sm capitalize ${finish === option ? "bg-raised text-fg" : "text-muted"}`}
+          className={`px-1.5 font-mono text-[10px] uppercase tracking-wider ${finish === option ? "text-copper" : "text-muted"}`}
         >
           {option}
         </button>
@@ -151,7 +285,19 @@ function FinishToggle() {
   );
 }
 
-function Transport({ onOpen }: { onOpen: () => void }) {
+function Transport({
+  onOpen,
+  eqOpen,
+  plOpen,
+  onToggleEq,
+  onTogglePl,
+}: {
+  onOpen: () => void;
+  eqOpen: boolean;
+  plOpen: boolean;
+  onToggleEq: () => void;
+  onTogglePl: () => void;
+}) {
   const tracks = useDesk((s) => s.tracks);
   const currentId = useDesk((s) => s.currentId);
   const playing = useDesk((s) => s.playing);
@@ -173,18 +319,15 @@ function Transport({ onOpen }: { onOpen: () => void }) {
   const shownDuration = duration || current?.duration || 0;
 
   return (
-    <section className="min-w-0 rounded-xl border border-line bg-panel p-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--color-fg)_8%,transparent)]">
-      <div className="grid gap-3 md:grid-cols-[7.5rem_minmax(0,1fr)]">
-        <div className="flex h-16 items-center justify-center rounded-lg bg-lcd font-mono text-2xl text-copper">
-          {formatTime(currentTime)}
-        </div>
-        <div className="flex min-w-0 flex-col justify-center">
-          <p className="truncate text-lg font-medium">{current?.title ?? "Nothing queued"}</p>
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="rounded-sm bg-lcd px-3 py-2">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="font-mono text-2xl text-copper">{formatTime(currentTime)}</p>
           <p className="font-mono text-xs text-muted">{formatTime(shownDuration)}</p>
         </div>
+        <p className="truncate text-sm">{current?.title ?? "Nothing queued"}</p>
+        <Scope active={playing} />
       </div>
-
-      <Scope active={playing} />
 
       <input
         className="seek"
@@ -198,14 +341,21 @@ function Transport({ onOpen }: { onOpen: () => void }) {
         onChange={(event) => seek(Number(event.target.value))}
       />
 
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
         <IconButton label="Previous" onClick={() => void prev()}>
           <SkipBack />
         </IconButton>
         <IconButton label={playing ? "Pause" : "Play"} onClick={() => void toggle()} primary>
           {playing ? <Pause /> : <Play />}
         </IconButton>
-        <IconButton label="Stop" onClick={() => { engine.pause(); engine.seek(0); useDesk.setState({ playing: false, currentTime: 0 }); }}>
+        <IconButton
+          label="Stop"
+          onClick={() => {
+            engine.pause();
+            engine.seek(0);
+            useDesk.setState({ playing: false, currentTime: 0 });
+          }}
+        >
           <Square />
         </IconButton>
         <IconButton label="Next" onClick={() => void next()}>
@@ -221,26 +371,33 @@ function Transport({ onOpen }: { onOpen: () => void }) {
         >
           {repeat === "one" ? <Repeat1 /> : <Repeat />}
         </IconButton>
+        <IconButton label={eqOpen ? "Close equalizer" : "Open equalizer"} pressed={eqOpen} onClick={onToggleEq}>
+          <span className="font-mono text-[11px] tracking-wide">EQ</span>
+        </IconButton>
+        <IconButton label={plOpen ? "Close playlist" : "Open playlist"} pressed={plOpen} onClick={onTogglePl}>
+          <span className="font-mono text-[11px] tracking-wide">PL</span>
+        </IconButton>
         <IconButton label="Add audio" onClick={onOpen}>
           <Upload />
         </IconButton>
-        <div className="ml-auto flex min-w-36 flex-1 items-center gap-2 md:max-w-48">
-          <button type="button" className="text-muted" aria-label={muted ? "Unmute" : "Mute"} onClick={toggleMute}>
-            {muted || volume === 0 ? <VolumeX /> : <Volume2 />}
-          </button>
-          <input
-            className="vol"
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={muted ? 0 : volume}
-            aria-label="Volume"
-            onChange={(event) => setVolume(Number(event.target.value))}
-          />
-        </div>
       </div>
-    </section>
+
+      <div className="flex items-center gap-2">
+        <button type="button" className="text-muted" aria-label={muted ? "Unmute" : "Mute"} onClick={toggleMute}>
+          {muted || volume === 0 ? <VolumeX /> : <Volume2 />}
+        </button>
+        <input
+          className="vol"
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={muted ? 0 : volume}
+          aria-label="Volume"
+          onChange={(event) => setVolume(Number(event.target.value))}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -264,7 +421,7 @@ function IconButton({
       aria-pressed={pressed}
       title={label}
       onClick={onClick}
-      className={`inline-flex h-11 w-11 items-center justify-center rounded-lg border border-line [&_svg]:size-5 ${primary ? "bg-copper text-lcd" : pressed ? "bg-raised text-copper" : "bg-raised text-fg"}`}
+      className={`inline-flex h-10 w-10 items-center justify-center rounded-sm border border-line [&_svg]:size-4 ${primary ? "bg-copper text-lcd" : pressed ? "bg-raised text-copper" : "bg-raised text-fg"}`}
     >
       {children}
     </button>
@@ -295,11 +452,11 @@ function Scope({ active }: { active: boolean }) {
   }, [active]);
 
   return (
-    <div className="mt-3 flex h-16 items-end gap-1" aria-hidden="true">
+    <div className="mt-2 flex h-12 items-end gap-px" aria-hidden="true">
       {levels.map((level, index) => (
         <span
           key={index}
-          className="min-w-0 flex-1 rounded-sm bg-copper"
+          className="min-w-0 flex-1 bg-copper"
           style={{ height: `${Math.max(8, level * 100)}%`, opacity: 0.35 + level * 0.65 }}
         />
       ))}
@@ -313,23 +470,20 @@ function Equalizer() {
   const applyPreset = useDesk((s) => s.applyPreset);
 
   return (
-    <section className="min-w-0 rounded-xl border border-line bg-panel p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-mono text-xs tracking-[0.18em] text-muted">EQUALIZER</h2>
-        <div className="flex flex-wrap gap-1">
-          {Object.keys(PRESETS).map((name) => (
-            <button
-              key={name}
-              type="button"
-              onClick={() => applyPreset(name)}
-              className="min-h-11 rounded-full px-3 text-sm text-muted hover:text-fg"
-            >
-              {name}
-            </button>
-          ))}
-        </div>
+    <div className="min-w-0">
+      <div className="mb-2 flex flex-wrap gap-1">
+        {Object.keys(PRESETS).map((name) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => applyPreset(name)}
+            className="min-h-9 rounded-sm px-2 font-mono text-[11px] uppercase tracking-wide text-muted hover:text-fg"
+          >
+            {name}
+          </button>
+        ))}
       </div>
-      <div className="grid grid-cols-5 gap-1 md:grid-cols-10">
+      <div className="grid grid-cols-10 gap-px">
         {BANDS.map((freq, index) => (
           <VSlider
             key={freq}
@@ -340,7 +494,7 @@ function Equalizer() {
           />
         ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -370,7 +524,7 @@ function VSlider({
   const percent = ((value - min) / (max - min)) * 100;
 
   return (
-    <div className="flex w-full min-w-0 flex-col items-center gap-2">
+    <div className="flex w-full min-w-0 flex-col items-center gap-1">
       <div
         ref={ref}
         role="slider"
@@ -380,7 +534,7 @@ function VSlider({
         aria-valuemax={max}
         aria-valuenow={value}
         aria-orientation="vertical"
-        className="relative h-28 w-11 touch-none md:h-36"
+        className="relative h-24 w-full touch-none"
         onPointerDown={(event) => {
           event.currentTarget.setPointerCapture(event.pointerId);
           fromClientY(event.clientY);
@@ -402,11 +556,11 @@ function VSlider({
           }}
         />
         <span
-          className="absolute left-1/2 size-4 -translate-x-1/2 rounded-full bg-copper"
-          style={{ bottom: `calc(${percent}% - 0.5rem)` }}
+          className="absolute left-1/2 size-3.5 -translate-x-1/2 rounded-full bg-copper"
+          style={{ bottom: `calc(${percent}% - 0.4375rem)` }}
         />
       </div>
-      <span className="font-mono text-xs text-muted">{caption}</span>
+      <span className="font-mono text-[10px] text-muted">{caption}</span>
     </div>
   );
 }
@@ -421,51 +575,50 @@ function Playlist() {
   const shown = tracks.filter((track) => track.title.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
-    <section className="flex min-h-80 min-w-0 flex-col rounded-xl border border-line bg-panel p-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="font-mono text-xs tracking-[0.18em] text-muted">PLAYLIST</h2>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="mb-2 flex items-center gap-2">
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Filter"
+          aria-label="Filter playlist"
+          className="min-h-9 min-w-0 flex-1 rounded-sm border border-line px-2 text-sm"
+        />
         <span className="font-mono text-xs text-muted">{tracks.length}</span>
       </div>
-      <input
-        type="search"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Filter"
-        aria-label="Filter playlist"
-        className="mb-3 min-h-11 rounded-lg border border-line px-3"
-      />
       {shown.length === 0 ? (
-        <p className="px-1 py-6 text-sm text-muted">
+        <p className="px-1 py-4 text-sm text-muted">
           {tracks.length === 0 ? "Drop audio onto the desk, or use the upload button." : "Nothing matches that filter."}
         </p>
       ) : (
-        <ul className="max-h-[50vh] overflow-y-auto md:max-h-[36rem]">
+        <ul className="min-h-0 flex-1 overflow-y-auto">
           {shown.map((track, index) => {
             const active = track.id === currentId;
             return (
-              <li key={track.id} className={`flex items-center gap-2 border-t border-line ${active ? "bg-raised" : ""}`}>
+              <li key={track.id} className={`flex items-center gap-1 border-t border-line ${active ? "bg-raised" : ""}`}>
                 <button
                   type="button"
                   onClick={() => void playId(track.id)}
-                  className={`flex min-h-11 min-w-0 flex-1 items-center gap-3 px-2 text-left ${active ? "text-copper" : "text-fg"}`}
+                  className={`flex min-h-10 min-w-0 flex-1 items-center gap-2 px-1 text-left text-sm ${active ? "text-copper" : "text-fg"}`}
                 >
-                  <span className="w-6 font-mono text-xs text-muted">{index + 1}</span>
+                  <span className="w-5 font-mono text-[10px] text-muted">{index + 1}</span>
                   <span className="min-w-0 flex-1 truncate">{track.title}</span>
-                  <span className="font-mono text-xs text-muted">{formatTime(track.duration)}</span>
+                  <span className="font-mono text-[10px] text-muted">{formatTime(track.duration)}</span>
                 </button>
                 <button
                   type="button"
                   aria-label={`Remove ${track.title}`}
                   onClick={() => void remove(track.id)}
-                  className="inline-flex h-11 w-11 items-center justify-center text-muted"
+                  className="inline-flex h-10 w-8 items-center justify-center text-muted"
                 >
-                  <X className="size-4" />
+                  <X className="size-3.5" />
                 </button>
               </li>
             );
           })}
         </ul>
       )}
-    </section>
+    </div>
   );
 }

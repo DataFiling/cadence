@@ -19,9 +19,9 @@ const distDir = path.resolve(__dirname, "..", "desktop-dist");
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1100,
-    height: 760,
-    minWidth: 390,
+    width: 460,
+    height: 780,
+    minWidth: 360,
     minHeight: 640,
     backgroundColor: "#14120f",
     title: "CADENCE",
