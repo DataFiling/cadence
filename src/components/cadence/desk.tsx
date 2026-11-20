@@ -13,6 +13,7 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
+import { acceptAttribute, playableFormats, type PlayableFormat } from "@/lib/cadence/codecs";
 import { engine } from "@/lib/cadence/engine";
 import { useDesk } from "@/lib/cadence/store";
 import { BAND_LABELS, BANDS, PRESETS, formatTime, type Finish } from "@/lib/cadence/types";
@@ -26,6 +27,7 @@ function isTypingTarget(target: EventTarget | null) {
 export function Desk() {
   const ready = useDesk((s) => s.ready);
   const busy = useDesk((s) => s.busy);
+  const activity = useDesk((s) => s.activity);
   const error = useDesk((s) => s.error);
   const hydrate = useDesk((s) => s.hydrate);
   const addFiles = useDesk((s) => s.addFiles);
@@ -38,11 +40,17 @@ export function Desk() {
   const toggleShuffle = useDesk((s) => s.toggleShuffle);
   const cycleRepeat = useDesk((s) => s.cycleRepeat);
   const [dragOver, setDragOver] = useState(false);
+  const [formats, setFormats] = useState<PlayableFormat[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const accept = acceptAttribute(playableFormats(() => false));
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    setFormats(playableFormats());
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -108,16 +116,38 @@ export function Desk() {
         <Playlist />
       </div>
 
-      <p className="font-mono text-xs text-muted">
-        {busy ? "Working the library…" : "Files stay in this browser. Space plays. Arrows seek and set volume."}
-      </p>
+      {activity ? (
+        <div className="flex flex-col gap-1.5" aria-live="polite">
+          <p className="font-mono text-xs text-copper">{activity.label}</p>
+          <div
+            className="h-1 overflow-hidden rounded-full bg-line"
+            role="progressbar"
+            aria-label={activity.label}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={activity.progress ?? undefined}
+          >
+            <div
+              className={`h-full bg-copper ${activity.progress == null ? "w-1/3 animate-pulse" : ""}`}
+              style={activity.progress == null ? undefined : { width: `${activity.progress}%` }}
+            />
+          </div>
+        </div>
+      ) : (
+        <p className="font-mono text-xs text-muted">
+          {busy
+            ? "Working the library…"
+            : "Files stay in this browser. Space plays. Arrows seek and set volume."}
+        </p>
+      )}
+      <FormatList formats={formats} />
       {error ? <p className="text-sm text-copper">{error}</p> : null}
       {!ready ? <p className="text-sm text-muted">Opening the desk…</p> : null}
 
       <input
         ref={fileRef}
         type="file"
-        accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a,.aac,.webm,.opus"
+        accept={accept}
         multiple
         className="hidden"
         onChange={(event) => {
@@ -127,6 +157,32 @@ export function Desk() {
         }}
       />
     </main>
+  );
+}
+
+function FormatList({ formats }: { formats: PlayableFormat[] | null }) {
+  if (!formats) {
+    return (
+      <p className="font-mono text-xs text-muted">Checking which formats this browser can play…</p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="font-mono text-xs tracking-[0.18em] text-muted">PLAYABLE</p>
+      <ul className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+        {formats.map((format) => (
+          <li
+            key={format.id}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-panel px-2.5 text-xs"
+          >
+            <span>{format.label}</span>
+            <span className="font-mono text-[10px] uppercase tracking-wide text-copper">
+              {format.via === "native" ? "native" : "FFmpeg"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -205,13 +261,24 @@ function Transport({ onOpen }: { onOpen: () => void }) {
         <IconButton label={playing ? "Pause" : "Play"} onClick={() => void toggle()} primary>
           {playing ? <Pause /> : <Play />}
         </IconButton>
-        <IconButton label="Stop" onClick={() => { engine.pause(); engine.seek(0); useDesk.setState({ playing: false, currentTime: 0 }); }}>
+        <IconButton
+          label="Stop"
+          onClick={() => {
+            engine.pause();
+            engine.seek(0);
+            useDesk.setState({ playing: false, currentTime: 0 });
+          }}
+        >
           <Square />
         </IconButton>
         <IconButton label="Next" onClick={() => void next()}>
           <SkipForward />
         </IconButton>
-        <IconButton label={shuffle ? "Shuffle on" : "Shuffle off"} pressed={shuffle} onClick={toggleShuffle}>
+        <IconButton
+          label={shuffle ? "Shuffle on" : "Shuffle off"}
+          pressed={shuffle}
+          onClick={toggleShuffle}
+        >
           <Shuffle />
         </IconButton>
         <IconButton
@@ -225,7 +292,12 @@ function Transport({ onOpen }: { onOpen: () => void }) {
           <Upload />
         </IconButton>
         <div className="ml-auto flex min-w-36 flex-1 items-center gap-2 md:max-w-48">
-          <button type="button" className="text-muted" aria-label={muted ? "Unmute" : "Mute"} onClick={toggleMute}>
+          <button
+            type="button"
+            className="text-muted"
+            aria-label={muted ? "Unmute" : "Mute"}
+            onClick={toggleMute}
+          >
             {muted || volume === 0 ? <VolumeX /> : <Volume2 />}
           </button>
           <input
@@ -389,8 +461,10 @@ function VSlider({
           if (event.currentTarget.hasPointerCapture(event.pointerId)) fromClientY(event.clientY);
         }}
         onKeyDown={(event) => {
-          if (event.key === "ArrowUp" || event.key === "ArrowRight") onChange(Math.min(max, value + 1));
-          if (event.key === "ArrowDown" || event.key === "ArrowLeft") onChange(Math.max(min, value - 1));
+          if (event.key === "ArrowUp" || event.key === "ArrowRight")
+            onChange(Math.min(max, value + 1));
+          if (event.key === "ArrowDown" || event.key === "ArrowLeft")
+            onChange(Math.max(min, value - 1));
         }}
       >
         <span className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 rounded-full bg-lcd" />
@@ -418,7 +492,9 @@ function Playlist() {
   const setQuery = useDesk((s) => s.setQuery);
   const playId = useDesk((s) => s.playId);
   const remove = useDesk((s) => s.remove);
-  const shown = tracks.filter((track) => track.title.toLowerCase().includes(query.trim().toLowerCase()));
+  const shown = tracks.filter((track) =>
+    track.title.toLowerCase().includes(query.trim().toLowerCase()),
+  );
 
   return (
     <section className="flex min-h-80 min-w-0 flex-col rounded-xl border border-line bg-panel p-4">
@@ -436,14 +512,19 @@ function Playlist() {
       />
       {shown.length === 0 ? (
         <p className="px-1 py-6 text-sm text-muted">
-          {tracks.length === 0 ? "Drop audio onto the desk, or use the upload button." : "Nothing matches that filter."}
+          {tracks.length === 0
+            ? "Drop a playable file onto the desk, or use the upload button."
+            : "Nothing matches that filter."}
         </p>
       ) : (
         <ul className="max-h-[50vh] overflow-y-auto md:max-h-[36rem]">
           {shown.map((track, index) => {
             const active = track.id === currentId;
             return (
-              <li key={track.id} className={`flex items-center gap-2 border-t border-line ${active ? "bg-raised" : ""}`}>
+              <li
+                key={track.id}
+                className={`flex items-center gap-2 border-t border-line ${active ? "bg-raised" : ""}`}
+              >
                 <button
                   type="button"
                   onClick={() => void playId(track.id)}
@@ -451,6 +532,11 @@ function Playlist() {
                 >
                   <span className="w-6 font-mono text-xs text-muted">{index + 1}</span>
                   <span className="min-w-0 flex-1 truncate">{track.title}</span>
+                  {track.converted ? (
+                    <span className="font-mono text-[10px] uppercase tracking-wide text-copper">
+                      FFmpeg
+                    </span>
+                  ) : null}
                   <span className="font-mono text-xs text-muted">{formatTime(track.duration)}</span>
                 </button>
                 <button

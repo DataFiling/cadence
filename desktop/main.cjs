@@ -17,6 +17,32 @@ protocol.registerSchemesAsPrivileged([
 
 const distDir = path.resolve(__dirname, "..", "desktop-dist");
 
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript",
+  ".mjs": "text/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".wasm": "application/wasm",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".map": "application/json",
+};
+
+function withContentType(response, file) {
+  const type = MIME[path.extname(file).toLowerCase()];
+  if (!type) return response;
+  const headers = new Headers(response.headers);
+  headers.set("Content-Type", type);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1100,
@@ -55,7 +81,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  protocol.handle("cadence", (request) => {
+  protocol.handle("cadence", async (request) => {
     const url = new URL(request.url);
     let pathname = decodeURIComponent(url.pathname);
     if (pathname === "/" || pathname === "") pathname = "/index.html";
@@ -63,7 +89,7 @@ app.whenReady().then(() => {
     if (!file.startsWith(distDir)) {
       return new Response("Forbidden", { status: 403 });
     }
-    return net.fetch(pathToFileURL(file).href);
+    return withContentType(await net.fetch(pathToFileURL(file).href), file);
   });
 
   createWindow();

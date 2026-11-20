@@ -1,6 +1,17 @@
 export const BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
 
-export const BAND_LABELS = ["32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"] as const;
+export const BAND_LABELS = [
+  "32",
+  "64",
+  "125",
+  "250",
+  "500",
+  "1k",
+  "2k",
+  "4k",
+  "8k",
+  "16k",
+] as const;
 
 export type RepeatMode = "off" | "all" | "one";
 
@@ -11,6 +22,8 @@ export type TrackMeta = {
   title: string;
   duration: number;
   added: number;
+  /** True when the stored audio was converted by FFmpeg before it was saved. */
+  converted?: boolean;
 };
 
 export type StoredTrack = TrackMeta & {

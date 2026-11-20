@@ -2,6 +2,13 @@ import { create } from "zustand";
 import { deleteTrack, getTrackBlob, listTracks, putTrack } from "./db";
 import { makeDemos } from "./demos";
 import { engine } from "./engine";
+import { matchFormat, playableFormats, unknownFormatMessage } from "./codecs";
+import { convertToWav, type LibraryActivity } from "./ffmpeg";
+import {
+  describePlaybackFailure,
+  playbackFailureMessage,
+  unsupportedFilesMessage,
+} from "./playback";
 import {
   DEFAULT_SETTINGS,
   PRESETS,
@@ -33,6 +40,7 @@ type DeskState = {
   query: string;
   ready: boolean;
   busy: boolean;
+  activity: LibraryActivity | null;
   error: string | null;
   hydrate: () => Promise<void>;
   addFiles: (files: File[]) => Promise<void>;
@@ -57,9 +65,10 @@ function loadSettings(): Settings {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS, bands: DEFAULT_SETTINGS.bands.slice() };
     const parsed = JSON.parse(raw) as Partial<Settings>;
-    const bands = Array.isArray(parsed.bands) && parsed.bands.length === 10
-      ? parsed.bands.map((n) => Number(n) || 0)
-      : DEFAULT_SETTINGS.bands.slice();
+    const bands =
+      Array.isArray(parsed.bands) && parsed.bands.length === 10
+        ? parsed.bands.map((n) => Number(n) || 0)
+        : DEFAULT_SETTINGS.bands.slice();
     return {
       volume: typeof parsed.volume === "number" ? parsed.volume : DEFAULT_SETTINGS.volume,
       muted: Boolean(parsed.muted),
@@ -73,7 +82,9 @@ function loadSettings(): Settings {
   }
 }
 
-function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "repeat" | "bands" | "finish">) {
+function saveSettings(
+  state: Pick<DeskState, "volume" | "muted" | "shuffle" | "repeat" | "bands" | "finish">,
+) {
   const settings: Settings = {
     volume: state.volume,
     muted: state.muted,
@@ -96,24 +107,6 @@ function shuffleIds(ids: string[], currentId: string | null): string[] {
   return currentId ? [currentId, ...rest] : rest;
 }
 
-function readDuration(file: File): Promise<number> {
-  return new Promise((resolve) => {
-    const audio = document.createElement("audio");
-    const url = URL.createObjectURL(file);
-    audio.preload = "metadata";
-    audio.src = url;
-    audio.onloadedmetadata = () => {
-      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
-      URL.revokeObjectURL(url);
-      resolve(duration);
-    };
-    audio.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(0);
-    };
-  });
-}
-
 let bound = false;
 
 export const useDesk = create<DeskState>((set, get) => {
@@ -123,19 +116,23 @@ export const useDesk = create<DeskState>((set, get) => {
     engine.setVolume(volume, muted);
   };
 
+  const titleFor = (id: string | null) =>
+    get().tracks.find((track) => track.id === id)?.title ?? null;
+
   const playStored = async (id: string) => {
-    engine.unlock();
     const blob = await getTrackBlob(id);
     if (!blob) {
       set({ error: "That track is missing from the library.", playing: false });
       return;
     }
+    const title = titleFor(id);
     set({ currentId: id, error: null, playing: true });
     try {
+      engine.unlock();
       await engine.loadAndPlay(blob);
-      set({ playing: true });
-    } catch {
-      set({ playing: false, error: "Playback was blocked. Press play again." });
+      set({ playing: true, error: null });
+    } catch (err) {
+      set({ playing: false, error: playbackFailureMessage(err, title) });
     }
   };
 
@@ -151,70 +148,121 @@ export const useDesk = create<DeskState>((set, get) => {
     query: "",
     ready: false,
     busy: false,
+    activity: null,
     error: null,
 
     hydrate: () => {
       if (hydrating) return hydrating;
       hydrating = (async () => {
-      if (!bound) {
-        bound = true;
-        engine.bind(
-          (currentTime, duration) => set({ currentTime, duration: duration || get().duration }),
-          () => {
-            void get().next(true);
-          },
-        );
-      }
-      const settings = loadSettings();
-      set({ ...settings, busy: true, error: null });
-      applyAudio();
-      document.documentElement.dataset.finish = settings.finish;
-      try {
-        let tracks = await listTracks();
-        if (tracks.length === 0 && !localStorage.getItem(SEEDED_KEY)) {
-          const demos = await makeDemos();
-          for (const demo of demos) await putTrack(demo);
-          localStorage.setItem(SEEDED_KEY, "1");
-          tracks = await listTracks();
+        if (!bound) {
+          bound = true;
+          engine.bind(
+            (currentTime, duration) => set({ currentTime, duration: duration || get().duration }),
+            () => {
+              void get().next(true);
+            },
+            (failure) => {
+              const { currentId } = get();
+              set({
+                playing: false,
+                error: playbackFailureMessage(failure, titleFor(currentId)),
+              });
+            },
+          );
         }
-        const ids = tracks.map((track) => track.id);
-        set({
-          tracks,
-          order: settings.shuffle ? shuffleIds(ids, null) : ids,
-          ready: true,
-          busy: false,
-        });
-      } catch (err) {
-        set({
-          ready: true,
-          busy: false,
-          error: err instanceof Error ? err.message : "Could not open the library.",
-        });
-      }
+        const settings = loadSettings();
+        set({ ...settings, busy: true, error: null });
+        applyAudio();
+        document.documentElement.dataset.finish = settings.finish;
+        try {
+          let tracks = await listTracks();
+          if (tracks.length === 0 && !localStorage.getItem(SEEDED_KEY)) {
+            const demos = await makeDemos();
+            for (const demo of demos) await putTrack(demo);
+            localStorage.setItem(SEEDED_KEY, "1");
+            tracks = await listTracks();
+          }
+          const ids = tracks.map((track) => track.id);
+          set({
+            tracks,
+            order: settings.shuffle ? shuffleIds(ids, null) : ids,
+            ready: true,
+            busy: false,
+          });
+        } catch (err) {
+          set({
+            ready: true,
+            busy: false,
+            error: err instanceof Error ? err.message : "Could not open the library.",
+          });
+        }
       })();
       return hydrating;
     },
 
     addFiles: async (files) => {
-      const audioFiles = files.filter(
-        (file) => file.type.startsWith("audio/") || /\.(mp3|wav|ogg|flac|m4a|aac|webm|opus)$/i.test(file.name),
-      );
+      const formats = playableFormats();
+      const audioFiles = files.filter((file) => matchFormat(file, formats));
+      const unknown = files.filter((file) => !matchFormat(file, formats));
       if (audioFiles.length === 0) {
-        set({ error: "Drop audio files — mp3, wav, ogg, flac, m4a." });
+        set({
+          error:
+            unknown.length > 0
+              ? unknownFormatMessage(unknown)
+              : "Drop a file in a format this player can use.",
+          activity: null,
+        });
         return;
       }
-      set({ busy: true, error: null });
+      set({ busy: true, error: null, activity: null });
+      let converterBroken = false;
       try {
-        let added = Date.now();
+        const accepted: { file: File; duration: number; title: string; converted: boolean }[] = [];
+        const rejected: string[] = [];
         for (const file of audioFiles) {
-          const duration = await readDuration(file);
+          const probed = await engine.probe(file);
+          const title = stripExt(file.name);
+          if (probed.ok) {
+            accepted.push({ file, duration: probed.duration, title, converted: false });
+            continue;
+          }
+          if (converterBroken) {
+            rejected.push(file.name);
+            continue;
+          }
+          const converted = await convertToWav(file, (activity) => set({ activity }));
+          if (!converted.ok) {
+            rejected.push(file.name);
+            if (converted.fatal) converterBroken = true;
+            continue;
+          }
+          const wav = new File([converted.blob], `${title || "audio"}.wav`, { type: "audio/wav" });
+          const again = await engine.probe(wav);
+          if (!again.ok) {
+            rejected.push(file.name);
+            continue;
+          }
+          accepted.push({ file: wav, duration: again.duration, title, converted: true });
+        }
+        let added = Date.now();
+        for (const item of accepted) {
           await putTrack({
             id: crypto.randomUUID(),
-            title: stripExt(file.name),
-            duration,
+            title: item.title,
+            duration: item.duration,
             added: added++,
-            blob: file,
+            converted: item.converted,
+            blob: item.file,
           });
+        }
+        const parts = [
+          unknown.length > 0 ? unknownFormatMessage(unknown) : null,
+          rejected.length > 0 ? unsupportedFilesMessage(rejected) : null,
+        ].filter((part): part is string => Boolean(part));
+        const rejection = parts.length > 0 ? parts.join(" ") : null;
+        if (accepted.length === 0) {
+          set({ error: rejection });
+          return;
         }
         const tracks = await listTracks();
         const ids = tracks.map((track) => track.id);
@@ -222,13 +270,14 @@ export const useDesk = create<DeskState>((set, get) => {
         set({
           tracks,
           order: shuffle ? shuffleIds(ids, currentId) : ids,
-          busy: false,
+          error: rejection,
         });
       } catch (err) {
         set({
-          busy: false,
           error: err instanceof Error ? err.message : "Could not add those files.",
         });
+      } finally {
+        set({ busy: false, activity: null });
       }
     },
 
@@ -255,22 +304,26 @@ export const useDesk = create<DeskState>((set, get) => {
         if (first) await playStored(first.id);
         return;
       }
-      if (!playing) {
-        engine.unlock();
-        try {
-          const nextPlaying = await engine.toggle();
-          if (!nextPlaying && !engine.playing()) {
-            await playStored(currentId);
-            return;
-          }
-          set({ playing: nextPlaying, error: null });
-        } catch {
+      const title = titleFor(currentId);
+      try {
+        if (!playing) engine.unlock();
+        const nextPlaying = await engine.toggle();
+        if (!playing && !nextPlaying && !engine.playing()) {
           await playStored(currentId);
+          return;
         }
-        return;
+        set({ playing: nextPlaying, ...(nextPlaying ? { error: null } : {}) });
+      } catch (err) {
+        const failure = describePlaybackFailure(err, null);
+        // Reloading won't lift a permission block. Other failures go through
+        // playStored once so a stale element can recover, and so the message
+        // matches the bytes that are actually in the library.
+        if (!playing && failure.kind !== "blocked") {
+          await playStored(currentId);
+          return;
+        }
+        set({ playing: engine.playing(), error: playbackFailureMessage(failure, title) });
       }
-      const nextPlaying = await engine.toggle();
-      set({ playing: nextPlaying });
     },
 
     next: async (fromEnd = false) => {
@@ -337,7 +390,8 @@ export const useDesk = create<DeskState>((set, get) => {
     },
 
     cycleRepeat: () => {
-      const repeat: RepeatMode = get().repeat === "off" ? "all" : get().repeat === "all" ? "one" : "off";
+      const repeat: RepeatMode =
+        get().repeat === "off" ? "all" : get().repeat === "all" ? "one" : "off";
       set({ repeat });
       saveSettings(get());
     },

@@ -14,6 +14,10 @@ export default tseslint.config(
       ".vercel/**",
       ".nitro/**",
       "node_modules/**",
+      "desktop-dist/**",
+      "release/**",
+      "public/ffmpeg/**",
+      "vendor/ffmpeg-lgpl/**",
       "src/routeTree.gen.ts",
     ],
   },
@@ -44,4 +48,11 @@ export default tseslint.config(
   },
   // Disable rules that conflict with Prettier formatting.
   prettier,
+  {
+    // Electron's main process is CommonJS on purpose (`desktop/main.cjs`).
+    files: ["desktop/**/*.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 );
