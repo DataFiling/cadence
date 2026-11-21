@@ -1,6 +1,6 @@
 # CADENCE
 
-A local music desk: transport, a 10-band equalizer that actually filters the signal, a playlist, and a frequency scope.
+A local music desk: transport, a 10-band equalizer that actually filters the signal, a playlist, and a frequency scope. Player, EQ, and Playlist are views of one window; changing views does not interrupt playback.
 
 This is an original player. It is not Winamp, not affiliated with it, and it does not use that project's source. The official Winamp repository was pulled in 2024 under a license that blocks distributing modified builds, and the tree is a Windows-only Visual Studio project. CADENCE keeps the useful desk layout and runs in the browser.
 
@@ -10,12 +10,16 @@ Audio files stay in this browser (IndexedDB). Nothing is uploaded.
 
 - Drop audio onto the desk, or use the upload button. mp3, wav, ogg, flac, m4a.
 - Three short original pieces are generated the first time the library is empty.
-- Space plays and pauses. Arrow keys seek; shift-arrows change tracks. Up and down change volume. `M` mutes, `S` shuffles, `R` cycles repeat. `E` and `P` open the equalizer and playlist windows. Double-click a window bar to shade it.
+- Space plays and pauses. Arrow keys seek; shift-arrows change tracks. Up and down change volume. `M` mutes, `S` shuffles, `R` cycles repeat. `E` and `P` switch to the EQ and Playlist views; press the same key again or `Esc` to return to Player. The view buttons work the same way.
+- Appearance settings (gear icon) control the view animation: Off, Quick (120 ms), Normal (240 ms, default), or Smooth (400 ms). The preference is saved locally. Reduced motion settings turn off the animation automatically.
+- The EQ view arrives with a rounded EQ title and drifting musical notes, followed by its live sliders. All of these effects use the selected transition speed.
 
 ## Run
 
+Use Node.js 24 and npm. Extract the source ZIP, or clone this branch, then open a terminal in the folder containing `package.json`.
+
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -23,17 +27,21 @@ The dev server listens on port 8080.
 
 ## Desktop (Windows, Linux, Mac)
 
-The desk also packages as a desktop app with Electron. Archives are unsigned zip builds, so they compile on any of the three systems:
+The desk also packages as a desktop app with Electron. From a downloaded source ZIP or Git checkout, run `npm ci` and then build the archive for your system:
 
 ```bash
-npm install
+npm ci
 npm run dist:linux   # zip + AppImage
 npm run dist:win     # zip
 npm run dist:mac     # zip
 npm run dist         # all three
 ```
 
-Output lands in `release/`. `npm run desktop` opens the packaged UI after `npm run build:desktop`. `npm run desktop:dev` opens a window on the local dev server.
+Output lands in `release/`. `npm run desktop` opens the packaged UI after `npm run build:desktop`. `npm run desktop:dev` opens a window on the local dev server. You can also run `npm run build:desktop` alone to compile the UI without packaging it.
 
-Mac and Windows archives do not need that OS to compile. A signed Mac disk image or a Windows installer (NSIS) still has to be made on that platform.
+Build the archive on its target operating system. The ZIP builds are unsigned; signing and platform installers are separate steps.
+
+## Verification of the animated views
+
+The web production build (`npm run build`), desktop UI build (`npm run build:desktop`), TypeScript check (`npm run typecheck`), and ESLint check of the changed TypeScript files pass with Node.js 24. Live browser verification was blocked by the test environment, so playback continuity, visual animation behavior, and packaged desktop execution still need runtime verification.
 
