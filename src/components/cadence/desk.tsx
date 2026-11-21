@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
-  ChevronDown,
-  Minus,
   Pause,
   Play,
   Repeat,
   Repeat1,
+  Settings2,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -17,38 +16,18 @@ import {
 } from "lucide-react";
 import { engine } from "@/lib/cadence/engine";
 import { useDesk } from "@/lib/cadence/store";
-import { BAND_LABELS, BANDS, PRESETS, formatTime, type Finish } from "@/lib/cadence/types";
+import { BAND_LABELS, BANDS, PRESETS, formatTime, type Finish, type TransitionSpeed } from "@/lib/cadence/types";
 
-const PANES_KEY = "cadence-panes";
+type View = "player" | "eq" | "playlist";
 
-type Panes = {
-  eq: boolean;
-  pl: boolean;
-  shadeMain: boolean;
-  shadeEq: boolean;
-  shadePl: boolean;
-};
-
-function loadPanes(): Panes {
-  const base: Panes = { eq: true, pl: true, shadeMain: false, shadeEq: false, shadePl: false };
-  try {
-    const raw = JSON.parse(localStorage.getItem(PANES_KEY) || "") as Partial<Panes>;
-    return {
-      eq: raw.eq !== false,
-      pl: raw.pl !== false,
-      shadeMain: Boolean(raw.shadeMain),
-      shadeEq: Boolean(raw.shadeEq),
-      shadePl: Boolean(raw.shadePl),
-    };
-  } catch {
-    return base;
-  }
-}
+const VIEW_INDEX: Record<View, number> = { player: 0, eq: 1, playlist: 2 };
 
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(tag)
+    || target.isContentEditable
+    || Boolean(target.closest('[role="slider"]'));
 }
 
 export function Desk() {
@@ -65,40 +44,45 @@ export function Desk() {
   const toggleMute = useDesk((s) => s.toggleMute);
   const toggleShuffle = useDesk((s) => s.toggleShuffle);
   const cycleRepeat = useDesk((s) => s.cycleRepeat);
+  const transitionSpeed = useDesk((s) => s.transitionSpeed);
   const [dragOver, setDragOver] = useState(false);
-  const [panes, setPanes] = useState<Panes>({ eq: true, pl: true, shadeMain: false, shadeEq: false, shadePl: false });
-  const panesLoaded = useRef(false);
+  const [view, setView] = useState<View>("player");
   const fileRef = useRef<HTMLInputElement>(null);
+  const navRef = useRef<HTMLElement>(null);
+  const settingsRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
 
-  useEffect(() => {
-    setPanes(loadPanes());
-    panesLoaded.current = true;
+  const switchView = useCallback((target: View) => {
+    setView((current) => current === target && target !== "player" ? "player" : target);
+    if (settingsRef.current) settingsRef.current.open = false;
   }, []);
 
   useEffect(() => {
-    if (!panesLoaded.current) return;
-    localStorage.setItem(PANES_KEY, JSON.stringify(panes));
-  }, [panes]);
-
-  function patch(nextPanes: Partial<Panes>) {
-    setPanes((current) => ({ ...current, ...nextPanes }));
-  }
-
-  function toggleEq() {
-    setPanes((current) => ({ ...current, eq: !current.eq, shadeEq: current.eq ? current.shadeEq : false }));
-  }
-
-  function togglePl() {
-    setPanes((current) => ({ ...current, pl: !current.pl, shadePl: current.pl ? current.shadePl : false }));
-  }
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused.closest('.cadence-view[inert]')) {
+      navRef.current?.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus({ preventScroll: true });
+    }
+  }, [view]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (settingsRef.current?.open) {
+          settingsRef.current.open = false;
+          settingsRef.current.querySelector("summary")?.focus();
+        } else {
+          switchView("player");
+        }
+        return;
+      }
+      if (isTypingTarget(event.target)) return;
+      // Let Space activate a focused button or settings disclosure once.
+      if (event.key === " " && event.target instanceof Element && event.target.closest("button, summary")) return;
       if (event.key === " ") {
         event.preventDefault();
         void toggle();
@@ -122,19 +106,20 @@ export function Desk() {
         toggleShuffle();
       } else if (event.key === "r") {
         cycleRepeat();
-      } else if (event.key === "e") {
-        toggleEq();
-      } else if (event.key === "p") {
-        togglePl();
+      } else if (event.key === "e" && !event.repeat) {
+        switchView("eq");
+      } else if (event.key === "p" && !event.repeat) {
+        switchView("playlist");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [cycleRepeat, next, prev, seek, setVolume, toggle, toggleMute, toggleShuffle]);
+  }, [cycleRepeat, next, prev, seek, setVolume, switchView, toggle, toggleMute, toggleShuffle]);
 
   return (
     <main
-      className="mx-auto flex h-dvh w-full max-w-[30rem] flex-col overflow-hidden px-2 py-3 sm:px-4 sm:py-6"
+      data-transition-speed={transitionSpeed}
+      className="mx-auto flex h-dvh w-full max-w-[34rem] flex-col overflow-hidden px-2 py-3 sm:px-4 sm:py-6"
       onDragOver={(event) => {
         event.preventDefault();
         setDragOver(true);
@@ -146,48 +131,72 @@ export function Desk() {
         void addFiles([...event.dataTransfer.files]);
       }}
     >
-      <div className={`flex min-h-0 flex-1 flex-col gap-1 overflow-hidden rounded-md bg-lcd p-1 ${dragOver ? "outline outline-2 outline-offset-2 outline-copper" : ""}`}>
-        <Compartment
-          title="CADENCE"
-          shaded={panes.shadeMain}
-          onToggleShade={() => patch({ shadeMain: !panes.shadeMain })}
-          extra={<FinishToggle />}
-        >
-          <Transport
-            eqOpen={panes.eq}
-            plOpen={panes.pl}
-            onToggleEq={toggleEq}
-            onTogglePl={togglePl}
-            onOpen={() => fileRef.current?.click()}
-          />
-        </Compartment>
+      <div className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl ${dragOver ? "outline outline-2 outline-offset-2 outline-copper" : ""}`}>
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-raised px-3">
+          <span className="size-2 shrink-0 rounded-full bg-copper" aria-hidden="true" />
+          <h1 className="font-mono text-sm tracking-[0.18em] text-fg">CADENCE</h1>
+          <div className="ml-auto flex items-center gap-2">
+            <FinishToggle />
+            <AppearanceMenu refElement={settingsRef} />
+          </div>
+        </header>
 
-        {panes.eq ? (
-          <Compartment
-            title="EQUALIZER"
-            shaded={panes.shadeEq}
-            onToggleShade={() => patch({ shadeEq: !panes.shadeEq })}
-            onClose={() => patch({ eq: false })}
-          >
-            <Equalizer />
-          </Compartment>
-        ) : null}
+        <nav ref={navRef} aria-label="Player views" className="flex shrink-0 gap-1 border-b border-line bg-lcd px-2 pt-2">
+          {(["player", "eq", "playlist"] as const).map((target) => (
+            <button
+              key={target}
+              type="button"
+              aria-controls={`view-${target}`}
+              aria-pressed={view === target}
+              onClick={() => switchView(target)}
+              className={`min-h-10 flex-1 border-b-2 px-1 font-mono text-xs uppercase tracking-widest transition-colors ${view === target ? "border-copper text-copper" : "border-transparent text-muted hover:text-fg"}`}
+            >
+              {target === "eq" ? "EQ" : target}
+            </button>
+          ))}
+        </nav>
 
-        {panes.pl ? (
-          <Compartment
-            title="PLAYLIST"
-            shaded={panes.shadePl}
-            onToggleShade={() => patch({ shadePl: !panes.shadePl })}
-            onClose={() => patch({ pl: false })}
-            className={panes.shadePl ? "" : "min-h-0 flex-1"}
-          >
-            <Playlist />
-          </Compartment>
-        ) : null}
+        <div className="cadence-viewport min-h-0 flex-1 overflow-hidden bg-panel">
+          <div className="cadence-view-track flex h-full" style={{ transform: `translateX(-${VIEW_INDEX[view] * 100}%)` }}>
+            <section id="view-player" aria-hidden={view !== "player"} inert={view !== "player"} className="cadence-view">
+              <div className="mb-4 border-b border-line pb-3">
+                <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-copper">01 / Transport</p>
+                <h2 className="mt-1 text-2xl font-semibold">Player</h2>
+              </div>
+              <Transport
+                onToggleEq={() => switchView("eq")}
+                onTogglePl={() => switchView("playlist")}
+                onOpen={() => fileRef.current?.click()}
+              />
+              <p className="mt-auto pt-5 font-mono text-xs text-muted">Drop audio anywhere on the desk to add it.</p>
+            </section>
+
+            <section id="view-eq" aria-label="Equalizer" aria-hidden={view !== "eq"} inert={view !== "eq"} className={`cadence-view ${view === "eq" ? "is-active" : ""}`}>
+              <div className={`eq-mark mb-5 border-b border-line pb-3 ${view === "eq" ? "is-active" : ""}`}>
+                <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-copper">02 / Sound</p>
+                <div className="relative inline-flex items-center py-1" aria-label="Equalizer">
+                  <span className="eq-note eq-note-left" aria-hidden="true">♪</span>
+                  <h2 className="eq-wordmark">EQ</h2>
+                  <span className="eq-note eq-note-right" aria-hidden="true">♫</span>
+                </div>
+                <p className="text-sm text-muted">Shape the sound with ten live bands.</p>
+              </div>
+              <div className="eq-controls"><Equalizer /></div>
+            </section>
+
+            <section id="view-playlist" aria-hidden={view !== "playlist"} inert={view !== "playlist"} className="cadence-view">
+              <div className="mb-4 border-b border-line pb-3">
+                <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-copper">03 / Queue</p>
+                <h2 className="mt-1 text-2xl font-semibold">Playlist</h2>
+              </div>
+              <Playlist />
+            </section>
+          </div>
+        </div>
       </div>
 
       <p className="mt-2 shrink-0 font-mono text-xs text-muted">
-        {busy ? "Working the library…" : "EQ and PL open their own windows. Double-click a bar to shade it."}
+        {busy ? "Working the library…" : "One desk · E for EQ · P for playlist · Esc for player"}
       </p>
       {error ? <p className="mt-1 text-sm text-copper">{error}</p> : null}
       {!ready ? <p className="mt-1 text-sm text-muted">Opening the desk…</p> : null}
@@ -208,59 +217,32 @@ export function Desk() {
   );
 }
 
-function Compartment({
-  title,
-  shaded,
-  onToggleShade,
-  onClose,
-  extra,
-  className,
-  children,
-}: {
-  title: string;
-  shaded: boolean;
-  onToggleShade: () => void;
-  onClose?: () => void;
-  extra?: ReactNode;
-  className?: string;
-  children: ReactNode;
-}) {
+function AppearanceMenu({ refElement }: { refElement: RefObject<HTMLDetailsElement | null> }) {
+  const transitionSpeed = useDesk((s) => s.transitionSpeed);
+  const setTransitionSpeed = useDesk((s) => s.setTransitionSpeed);
   return (
-    <section className={`flex min-h-0 min-w-0 flex-col border border-line bg-panel ${className ?? ""}`}>
-      <header
-        className="flex h-8 shrink-0 select-none items-center gap-2 border-b border-line bg-raised px-2"
-        onDoubleClick={onToggleShade}
-      >
-        <span className="size-2 shrink-0 rounded-full bg-copper" aria-hidden />
-        <h2 className="font-mono text-[11px] tracking-[0.18em] text-muted">{title}</h2>
-        {extra}
-        <div className="ml-auto flex items-center">
-          <button
-            type="button"
-            aria-label={shaded ? `Expand ${title}` : `Shade ${title}`}
-            title={shaded ? "Expand" : "Shade"}
-            onClick={onToggleShade}
-            onDoubleClick={(event) => event.stopPropagation()}
-            className="inline-flex h-8 w-8 items-center justify-center text-muted"
-          >
-            {shaded ? <ChevronDown className="size-3.5" /> : <Minus className="size-3.5" />}
-          </button>
-          {onClose ? (
-            <button
-              type="button"
-              aria-label={`Close ${title}`}
-              title="Close"
-              onClick={onClose}
-              onDoubleClick={(event) => event.stopPropagation()}
-              className="inline-flex h-8 w-8 items-center justify-center text-muted"
-            >
-              <X className="size-3.5" />
-            </button>
-          ) : null}
-        </div>
-      </header>
-      {shaded ? null : <div className="flex min-h-0 flex-1 flex-col p-3">{children}</div>}
-    </section>
+    <details ref={refElement} className="relative z-10">
+      <summary aria-label="Appearance settings" title="Appearance settings" className="flex size-9 list-none items-center justify-center rounded-sm border border-line text-muted hover:text-fg [&::-webkit-details-marker]:hidden">
+        <Settings2 className="size-4" />
+      </summary>
+      <div className="absolute right-0 top-10 w-64 rounded-md border border-line bg-raised p-4 shadow-xl">
+        <p className="mb-3 font-mono text-xs uppercase tracking-widest text-copper">Appearance</p>
+        <label htmlFor="transition-speed" className="block text-sm font-medium">Transition speed</label>
+        <p className="mb-2 text-xs leading-5 text-muted">Choose how quickly Cadence moves between Player, Playlist, and EQ.</p>
+        <select
+          id="transition-speed"
+          value={transitionSpeed}
+          onChange={(event) => setTransitionSpeed(event.target.value as TransitionSpeed)}
+          className="min-h-10 w-full rounded-sm border border-line bg-lcd px-2 text-sm text-fg"
+        >
+          <option value="off">Off — instant</option>
+          <option value="quick">Quick — 120 ms</option>
+          <option value="normal">Normal — 240 ms (default)</option>
+          <option value="smooth">Smooth — 400 ms</option>
+        </select>
+        <p className="mt-2 text-xs leading-5 text-muted">Your device’s reduced motion setting turns these animations off.</p>
+      </div>
+    </details>
   );
 }
 
@@ -287,14 +269,10 @@ function FinishToggle() {
 
 function Transport({
   onOpen,
-  eqOpen,
-  plOpen,
   onToggleEq,
   onTogglePl,
 }: {
   onOpen: () => void;
-  eqOpen: boolean;
-  plOpen: boolean;
   onToggleEq: () => void;
   onTogglePl: () => void;
 }) {
@@ -371,10 +349,10 @@ function Transport({
         >
           {repeat === "one" ? <Repeat1 /> : <Repeat />}
         </IconButton>
-        <IconButton label={eqOpen ? "Close equalizer" : "Open equalizer"} pressed={eqOpen} onClick={onToggleEq}>
+        <IconButton label="Open equalizer" onClick={onToggleEq}>
           <span className="font-mono text-[11px] tracking-wide">EQ</span>
         </IconButton>
-        <IconButton label={plOpen ? "Close playlist" : "Open playlist"} pressed={plOpen} onClick={onTogglePl}>
+        <IconButton label="Open playlist" onClick={onTogglePl}>
           <span className="font-mono text-[11px] tracking-wide">PL</span>
         </IconButton>
         <IconButton label="Add audio" onClick={onOpen}>
@@ -543,8 +521,14 @@ function VSlider({
           if (event.currentTarget.hasPointerCapture(event.pointerId)) fromClientY(event.clientY);
         }}
         onKeyDown={(event) => {
-          if (event.key === "ArrowUp" || event.key === "ArrowRight") onChange(Math.min(max, value + 1));
-          if (event.key === "ArrowDown" || event.key === "ArrowLeft") onChange(Math.max(min, value - 1));
+          if (event.key === "ArrowUp" || event.key === "ArrowRight") {
+            event.preventDefault();
+            onChange(Math.min(max, value + 1));
+          }
+          if (event.key === "ArrowDown" || event.key === "ArrowLeft") {
+            event.preventDefault();
+            onChange(Math.max(min, value - 1));
+          }
         }}
       >
         <span className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 rounded-full bg-lcd" />

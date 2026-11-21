@@ -67,8 +67,114 @@ input[type="search"]::placeholder {
   color: var(--color-muted);
 }
 
+.cadence-viewport {
+  --view-duration: 240ms;
+}
+
+[data-transition-speed="off"] .cadence-viewport {
+  --view-duration: 0ms;
+}
+
+[data-transition-speed="quick"] .cadence-viewport {
+  --view-duration: 120ms;
+}
+
+[data-transition-speed="smooth"] .cadence-viewport {
+  --view-duration: 400ms;
+}
+
+.cadence-view-track {
+  transition: transform var(--view-duration) cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cadence-view {
+  display: flex;
+  flex: 0 0 100%;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.eq-wordmark {
+  color: var(--color-copper);
+  font-family: ui-rounded, "Arial Rounded MT Bold", var(--font-sans);
+  font-size: clamp(4.5rem, 18vw, 6.5rem);
+  font-weight: 800;
+  letter-spacing: -0.09em;
+  line-height: 1.05;
+  text-shadow: 0 0.08em 0 color-mix(in oklab, var(--color-copper) 15%, transparent);
+  transform-origin: left center;
+}
+
+.eq-note {
+  position: absolute;
+  color: var(--color-copper);
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.eq-note-left {
+  top: 5%;
+  left: -1.1rem;
+  transform: rotate(-18deg);
+}
+
+.eq-note-right {
+  right: -2.2rem;
+  bottom: 8%;
+  transform: rotate(15deg);
+}
+
+.eq-mark.is-active .eq-note-left {
+  animation: note-left var(--view-duration) ease-out both;
+}
+
+.eq-mark.is-active .eq-note-right {
+  animation: note-right var(--view-duration) ease-out both;
+}
+
+.eq-mark.is-active .eq-wordmark {
+  animation: eq-arrive var(--view-duration) cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.cadence-view.is-active .eq-controls {
+  animation: eq-controls-arrive var(--view-duration) ease-out both;
+}
+
+@keyframes eq-arrive {
+  from { opacity: 0; transform: translate(0.75rem, 1rem) scale(1.35) rotate(-6deg); }
+  to { opacity: 1; transform: translate(0, 0) scale(1) rotate(0); }
+}
+
+@keyframes eq-controls-arrive {
+  from { opacity: 0; transform: translateY(1rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes note-left {
+  from { opacity: 0; transform: translate(-1.5rem, 0.7rem) rotate(-35deg); }
+  to { opacity: 1; transform: translate(0, 0) rotate(-18deg); }
+}
+
+@keyframes note-right {
+  from { opacity: 0; transform: translate(1.5rem, -0.7rem) rotate(35deg); }
+  to { opacity: 1; transform: translate(0, 0) rotate(15deg); }
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-copper);
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .cadence-view-track,
+  .eq-note,
+  .eq-wordmark,
+  .eq-controls,
   .marquee-track {
+    transition-duration: 0ms !important;
     animation: none !important;
   }
 }

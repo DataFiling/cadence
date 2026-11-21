@@ -10,6 +10,7 @@ import {
   type RepeatMode,
   type Settings,
   type TrackMeta,
+  type TransitionSpeed,
 } from "./types";
 
 const SETTINGS_KEY = "cadence-settings";
@@ -30,6 +31,7 @@ type DeskState = {
   repeat: RepeatMode;
   bands: number[];
   finish: Finish;
+  transitionSpeed: TransitionSpeed;
   query: string;
   ready: boolean;
   busy: boolean;
@@ -50,6 +52,7 @@ type DeskState = {
   applyPreset: (name: string) => void;
   setQuery: (query: string) => void;
   setFinish: (finish: Finish) => void;
+  setTransitionSpeed: (speed: TransitionSpeed) => void;
 };
 
 function loadSettings(): Settings {
@@ -67,13 +70,16 @@ function loadSettings(): Settings {
       repeat: parsed.repeat === "all" || parsed.repeat === "one" ? parsed.repeat : "off",
       bands,
       finish: parsed.finish === "brass" ? "brass" : "carbon",
+      transitionSpeed: parsed.transitionSpeed === "off" || parsed.transitionSpeed === "quick" || parsed.transitionSpeed === "smooth"
+        ? parsed.transitionSpeed
+        : "normal",
     };
   } catch {
     return { ...DEFAULT_SETTINGS, bands: DEFAULT_SETTINGS.bands.slice() };
   }
 }
 
-function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "repeat" | "bands" | "finish">) {
+function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "repeat" | "bands" | "finish" | "transitionSpeed">) {
   const settings: Settings = {
     volume: state.volume,
     muted: state.muted,
@@ -81,6 +87,7 @@ function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "r
     repeat: state.repeat,
     bands: state.bands,
     finish: state.finish,
+    transitionSpeed: state.transitionSpeed,
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
@@ -364,6 +371,11 @@ export const useDesk = create<DeskState>((set, get) => {
     setFinish: (finish) => {
       document.documentElement.dataset.finish = finish;
       set({ finish });
+      saveSettings(get());
+    },
+
+    setTransitionSpeed: (transitionSpeed) => {
+      set({ transitionSpeed });
       saveSettings(get());
     },
   };

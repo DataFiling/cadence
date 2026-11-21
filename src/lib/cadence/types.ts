@@ -6,6 +6,8 @@ export type RepeatMode = "off" | "all" | "one";
 
 export type Finish = "carbon" | "brass";
 
+export type TransitionSpeed = "off" | "quick" | "normal" | "smooth";
+
 export type TrackMeta = {
   id: string;
   title: string;
@@ -24,6 +26,7 @@ export type Settings = {
   repeat: RepeatMode;
   bands: number[];
   finish: Finish;
+  transitionSpeed: TransitionSpeed;
 };
 
 export const PRESETS: Record<string, number[]> = {
@@ -40,6 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   repeat: "off",
   bands: PRESETS.Flat.slice(),
   finish: "carbon",
+  transitionSpeed: "normal",
 };
 
 export function formatTime(seconds: number): string {
