@@ -27,23 +27,25 @@ The dev server listens on port 8080.
 
 ## Desktop (Windows, Linux, Mac)
 
-The desk also packages as a desktop app with Electron. From a downloaded source ZIP or Git checkout, run `npm ci` and then build the archive for your system:
+Windows setup installs Cadence for the current user and adds it to Start. On Debian or Ubuntu, open the `.deb` in your software installer. On other Linux systems, mark the `.AppImage` executable and open it directly.
+
+To build from a source ZIP or Git checkout, run `npm ci` and then the command for your operating system.
 
 ```bash
 npm ci
-npm run dist:linux   # zip + AppImage
-npm run dist:win     # zip
+npm run dist:linux   # Debian package, AppImage, and ZIP
+npm run dist:win     # Windows setup EXE and ZIP
 npm run dist:mac     # zip
-npm run dist         # all three
+npm run dist         # ZIP archives for all three platforms
 ```
 
 Output lands in `release/`. `npm run desktop` opens the packaged UI after `npm run build:desktop`. `npm run desktop:dev` opens a window on the local dev server. You can also run `npm run build:desktop` alone to compile the UI without packaging it.
 
-Build the archive on its target operating system. The ZIP builds are unsigned; signing and platform installers are separate steps.
+The Windows setup is unsigned unless you configure a code-signing certificate.
 
 ## Verification of the animated views
 
 The desktop UI built with `npm run build:desktop` was tested in Chrome. Player, EQ, and Playlist slide within the same frame. All four transition speeds were checked, and the selected speed survived a reload. Opening Playlist, immediately tabbing into its search field, then pressing Escape returns to a centered Player. Imported MP3 and AAC (.m4a) tracks kept their place and continued advancing while switching views.
 
-The web and desktop UI builds and the TypeScript check pass with Node.js 24. Packaged Electron apps still need testing on their target operating systems.
+The web and desktop UI builds and the TypeScript check pass with Node.js 24. The x64 Windows installer, Debian package, and AppImage were unpacked and checked against the tested desktop bundle. The Linux Electron runtime was started from both Linux packages. A full desktop install-and-launch test is still pending on Windows and Linux.
 
