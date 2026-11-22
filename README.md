@@ -12,7 +12,7 @@ Audio files stay in this browser (IndexedDB). Nothing is uploaded.
 - Three short original pieces are generated the first time the library is empty.
 - Space plays and pauses. Arrow keys seek; shift-arrows change tracks. Up and down change volume. `M` mutes, `S` shuffles, `R` cycles repeat. `E` and `P` switch to the EQ and Playlist views; press the same key again or `Esc` to return to Player. The view buttons work the same way.
 - Appearance settings (gear icon) control the view animation: Off, Quick (120 ms), Normal (240 ms, default), or Smooth (400 ms). The preference is saved locally. Reduced motion settings turn off the animation automatically.
-- The EQ view arrives with a rounded EQ title and drifting musical notes, followed by its live sliders. All of these effects use the selected transition speed.
+- When EQ opens, the title straightens, the musical notes drift into place, and the sliders rise together. All of these effects use the selected transition speed.
 
 ## Run
 
@@ -43,5 +43,7 @@ Build the archive on its target operating system. The ZIP builds are unsigned; s
 
 ## Verification of the animated views
 
-The web production build (`npm run build`), desktop UI build (`npm run build:desktop`), TypeScript check (`npm run typecheck`), and ESLint check of the changed TypeScript files pass with Node.js 24. Live browser verification was blocked by the test environment, so playback continuity, visual animation behavior, and packaged desktop execution still need runtime verification.
+The desktop UI built with `npm run build:desktop` was tested in Chrome. Player, EQ, and Playlist slide within the same frame. All four transition speeds were checked, and the selected speed survived a reload. Opening Playlist, immediately tabbing into its search field, then pressing Escape returns to a centered Player. Imported MP3 and AAC (.m4a) tracks kept their place and continued advancing while switching views.
+
+The web and desktop UI builds and the TypeScript check pass with Node.js 24. Packaged Electron apps still need testing on their target operating systems.
 

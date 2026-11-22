@@ -156,7 +156,7 @@ export function Desk() {
           ))}
         </nav>
 
-        <div className="cadence-viewport min-h-0 flex-1 overflow-hidden bg-panel">
+        <div className="cadence-viewport min-h-0 flex-1 overflow-clip bg-panel">
           <div className="cadence-view-track flex h-full" style={{ transform: `translateX(-${VIEW_INDEX[view] * 100}%)` }}>
             <section id="view-player" aria-hidden={view !== "player"} inert={view !== "player"} className="cadence-view">
               <div className="mb-4 border-b border-line pb-3">
