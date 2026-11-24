@@ -27,13 +27,14 @@ The dev server listens on port 8080.
 
 ## Desktop (Windows, Linux, Mac)
 
-Windows setup installs Cadence for the current user and adds it to Start. On Debian or Ubuntu, open the `.deb` in your software installer. On other Linux systems, mark the `.AppImage` executable and open it directly.
+Windows setup installs Cadence for the current user and adds it to Start. On Debian or Ubuntu, open the `.deb` in your software installer. On Fedora Workstation, run `sudo dnf install ./cadence-0.1.0-fedora-x86_64.rpm` from the download directory. For portable use on Linux, mark the `.AppImage` executable and open it directly.
 
 To build from a source ZIP or Git checkout, run `npm ci` and then the command for your operating system.
 
 ```bash
 npm ci
 npm run dist:linux   # Debian package, AppImage, and ZIP
+npm run dist:fedora  # x86_64 RPM (requires rpmbuild, provided by rpm-build on Fedora)
 npm run dist:win     # Windows setup EXE and ZIP
 npm run dist:mac     # zip
 npm run dist         # ZIP archives for all three platforms

@@ -19,6 +19,7 @@
     "desktop:dev": "CADENCE_DEV_URL=http://127.0.0.1:8080 electron desktop/main.cjs",
     "dist": "npm run build:desktop && electron-builder --linux zip --win zip --mac zip",
     "dist:linux": "npm run build:desktop && electron-builder --linux",
+    "dist:fedora": "npm run build:desktop && electron-builder --linux rpm --x64 --publish never",
     "dist:win": "npm run build:desktop && electron-builder --win",
     "dist:mac": "npm run build:desktop && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac zip",
     "db:migrate": "node scripts/migrate.mjs",
@@ -133,6 +134,27 @@
     },
     "deb": {
       "maintainer": "DataFiling <83735485+DataFiling@users.noreply.github.com>"
+    },
+    "rpm": {
+      "artifactName": "cadence-${version}-fedora-${arch}.${ext}",
+      "maintainer": "DataFiling <83735485+DataFiling@users.noreply.github.com>",
+      "packageCategory": "Applications/Multimedia",
+      "fpm": ["--rpm-digest", "sha256", "--rpm-compression-level", "4"],
+      "depends": [
+        "alsa-lib",
+        "at-spi2-core",
+        "cups-libs",
+        "gtk3",
+        "libnotify",
+        "libsecret",
+        "libuuid",
+        "libxkbcommon",
+        "libXScrnSaver",
+        "libXtst",
+        "mesa-libgbm",
+        "nss",
+        "xdg-utils"
+      ]
     },
     "win": {
       "artifactName": "CADENCE-${version}-win.${ext}",
