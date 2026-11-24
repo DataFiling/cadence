@@ -16,6 +16,12 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 const distDir = path.resolve(__dirname, "..", "desktop-dist");
+const appPage = new URL(process.env.CADENCE_DEV_URL || "cadence://app/");
+
+function isAppPage(url) {
+  const page = URL.parse(url);
+  return page?.protocol === appPage.protocol && page.host === appPage.host;
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -23,14 +29,25 @@ function createWindow() {
     height: 780,
     minWidth: 360,
     minHeight: 640,
+    frame: false,
+    hasShadow: false,
     backgroundColor: "#14120f",
     title: "CADENCE",
     autoHideMenuBar: true,
     webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+
+  win.webContents.ipc.on("cadence:window-control", (event, action) => {
+    const frame = event.senderFrame;
+    if (!frame || frame !== win.webContents.mainFrame || !isAppPage(frame.url)) return;
+
+    if (action === "minimize") win.minimize();
+    if (action === "close") win.close();
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -41,17 +58,10 @@ function createWindow() {
   });
 
   win.webContents.on("will-navigate", (event, url) => {
-    const dev = process.env.CADENCE_DEV_URL;
-    if (dev && url.startsWith(dev)) return;
-    if (url.startsWith("cadence://")) return;
-    event.preventDefault();
+    if (!isAppPage(url)) event.preventDefault();
   });
 
-  if (process.env.CADENCE_DEV_URL) {
-    win.loadURL(process.env.CADENCE_DEV_URL);
-    return;
-  }
-  win.loadURL("cadence://app/");
+  win.loadURL(appPage.href);
 }
 
 app.whenReady().then(() => {

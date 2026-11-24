@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import {
+  Minus,
   Pause,
   Play,
   Repeat,
@@ -20,7 +21,17 @@ import { BAND_LABELS, BANDS, PRESETS, formatTime, type Finish, type TransitionSp
 
 type View = "player" | "eq" | "playlist";
 
+declare global {
+  interface Window {
+    cadenceWindow?: {
+      minimize: () => void;
+      close: () => void;
+    };
+  }
+}
+
 const VIEW_INDEX: Record<View, number> = { player: 0, eq: 1, playlist: 2 };
+const subscribeToWindowControls = () => () => {};
 
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
@@ -30,7 +41,13 @@ function isTypingTarget(target: EventTarget | null) {
     || Boolean(target.closest('[role="slider"]'));
 }
 
-export function Desk() {
+export function Desk({ desktop = false }: { desktop?: boolean }) {
+  const windowControls = useSyncExternalStore(
+    subscribeToWindowControls,
+    () => window.cadenceWindow,
+    () => undefined,
+  );
+  const desktopLayout = desktop || Boolean(windowControls);
   const ready = useDesk((s) => s.ready);
   const busy = useDesk((s) => s.busy);
   const error = useDesk((s) => s.error);
@@ -116,10 +133,14 @@ export function Desk() {
     return () => window.removeEventListener("keydown", onKey);
   }, [cycleRepeat, next, prev, seek, setVolume, switchView, toggle, toggleMute, toggleShuffle]);
 
+  const deskLayout = desktopLayout ? "bg-panel" : "mx-auto max-w-[34rem] px-2 py-3 sm:px-4 sm:py-6";
+  const panelFrame = desktopLayout ? "" : "rounded-lg border border-line shadow-2xl";
+  const dropOutlineOffset = desktopLayout ? "-outline-offset-2" : "outline-offset-2";
+
   return (
     <main
       data-transition-speed={transitionSpeed}
-      className="mx-auto flex h-dvh w-full max-w-[34rem] flex-col overflow-hidden px-2 py-3 sm:px-4 sm:py-6"
+      className={`flex h-dvh w-full flex-col overflow-hidden ${deskLayout}`}
       onDragOver={(event) => {
         event.preventDefault();
         setDragOver(true);
@@ -131,13 +152,23 @@ export function Desk() {
         void addFiles([...event.dataTransfer.files]);
       }}
     >
-      <div className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl ${dragOver ? "outline outline-2 outline-offset-2 outline-copper" : ""}`}>
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-raised px-3">
+      <div className={`flex min-h-0 flex-1 flex-col overflow-hidden bg-panel ${panelFrame} ${dragOver ? `outline outline-2 outline-copper ${dropOutlineOffset}` : ""}`}>
+        <header className={`flex h-12 shrink-0 items-center gap-2 border-b border-line bg-raised px-3 ${desktopLayout ? "cadence-titlebar" : ""}`}>
           <span className="size-2 shrink-0 rounded-full bg-copper" aria-hidden="true" />
           <h1 className="font-mono text-sm tracking-[0.18em] text-fg">CADENCE</h1>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="cadence-titlebar-controls ml-auto flex shrink-0 items-center gap-2">
             <FinishToggle />
             <AppearanceMenu refElement={settingsRef} />
+            {windowControls && (
+              <div role="group" aria-label="Window controls" className="flex items-center border-l border-line pl-1">
+                <button type="button" aria-label="Minimize window" title="Minimize" onClick={windowControls.minimize} className="flex size-7 items-center justify-center rounded-sm text-muted hover:bg-panel hover:text-fg">
+                  <Minus className="size-3.5" aria-hidden="true" />
+                </button>
+                <button type="button" aria-label="Close window" title="Close" onClick={windowControls.close} className="flex size-7 items-center justify-center rounded-sm text-muted hover:bg-panel hover:text-fg">
+                  <X className="size-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -195,11 +226,15 @@ export function Desk() {
         </div>
       </div>
 
-      <p className="mt-2 shrink-0 font-mono text-xs text-muted">
-        {busy ? "Working the library…" : "One desk · E for EQ · P for playlist · Esc for player"}
-      </p>
-      {error ? <p className="mt-1 text-sm text-copper">{error}</p> : null}
-      {!ready ? <p className="mt-1 text-sm text-muted">Opening the desk…</p> : null}
+      <div className={desktopLayout ? "shrink-0 px-4 [&>p:last-child]:pb-2" : "shrink-0"}>
+        {(busy || !desktopLayout) && (
+          <p className="mt-2 font-mono text-xs text-muted">
+            {busy ? "Working the library…" : "One desk · E for EQ · P for playlist · Esc for player"}
+          </p>
+        )}
+        {error ? <p className="mt-1 text-sm text-copper">{error}</p> : null}
+        {!ready ? <p className="mt-1 text-sm text-muted">Opening the desk…</p> : null}
+      </div>
 
       <input
         ref={fileRef}

@@ -67,6 +67,15 @@ input[type="search"]::placeholder {
   color: var(--color-muted);
 }
 
+.cadence-titlebar {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.cadence-titlebar .cadence-titlebar-controls {
+  -webkit-app-region: no-drag;
+}
+
 .cadence-viewport {
   --view-duration: 240ms;
 }
