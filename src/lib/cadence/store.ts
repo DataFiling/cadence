@@ -358,9 +358,8 @@ export const useDesk = create<DeskState>((set, get) => {
     },
 
     applyPreset: (name) => {
-      const preset = PRESETS[name];
-      if (!preset) return;
-      const bands = preset.slice();
+      if (!Object.hasOwn(PRESETS, name)) return;
+      const bands = PRESETS[name].slice();
       set({ bands });
       engine.setBands(bands);
       saveSettings(get());

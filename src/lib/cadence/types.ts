@@ -29,11 +29,18 @@ export type Settings = {
   transitionSpeed: TransitionSpeed;
 };
 
-export const PRESETS: Record<string, number[]> = {
+export const PRESETS: Readonly<Record<string, readonly number[]>> = {
   Flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  Low: [6, 5, 3, 1, 0, -1, -1, 0, 1, 2],
-  Voice: [-2, -1, 0, 2, 4, 4, 2, 1, 0, -1],
+  "Bass Boost": [6, 5, 3, 1, 0, -1, -1, 0, 1, 2],
+  "Treble Boost": [0, 0, 0, 0, 0, 0, 1, 2, 3, 4],
+  "Voice / Podcasts": [-2, -1, 0, 2, 4, 4, 2, 1, 0, -1],
   Night: [3, 2, 0, -1, -2, -2, -1, 1, 2, 3],
+  Acoustic: [0, 1, 1, 0, 1, 2, 2, 2, 1, 0],
+  Classical: [1, 1, 0, 0, 0, 0, 1, 2, 2, 1],
+  Electronic: [4, 4, 2, 0, -1, -2, 0, 2, 3, 3],
+  Jazz: [1, 2, 2, 1, 0, 0, 1, 1, 2, 2],
+  Pop: [-1, 1, 2, 0, 0, 2, 3, 2, 1, 0],
+  Rock: [3, 4, 2, 0, -1, -1, 1, 3, 3, 2],
 };
 
 export const DEFAULT_SETTINGS: Settings = {

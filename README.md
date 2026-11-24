@@ -13,6 +13,7 @@ Audio files stay in this browser (IndexedDB). Nothing is uploaded.
 - Space plays and pauses. Arrow keys seek; shift-arrows change tracks. Up and down change volume. `M` mutes, `S` shuffles, `R` cycles repeat. `E` and `P` switch to the EQ and Playlist views; press the same key again or `Esc` to return to Player. The view buttons work the same way.
 - Appearance settings (gear icon) control the view animation: Off, Quick (120 ms), Normal (240 ms, default), or Smooth (400 ms). The preference is saved locally. Reduced motion settings turn off the animation automatically.
 - When EQ opens, the title straightens, the musical notes drift into place, and the sliders rise together. All of these effects use the selected transition speed.
+- Choose an EQ profile for speech, a music genre, or a bass or treble boost. Select Flat to reset all ten bands. Adjusting a slider shows Custom when the settings differ from a built-in profile, and Cadence remembers the band settings.
 
 ## Run
 
@@ -27,7 +28,7 @@ The dev server listens on port 8080.
 
 ## Desktop (Windows, Linux, Mac)
 
-Windows setup installs Cadence for the current user and adds it to Start. On Debian or Ubuntu, open the `.deb` in your software installer. On Fedora Workstation, run `sudo dnf install ./cadence-0.1.1-fedora-x86_64.rpm` from the download directory. For portable use on Linux, mark the `.AppImage` executable and open it directly.
+Windows setup installs Cadence for the current user and adds it to Start. On Debian or Ubuntu, open the `.deb` in your software installer. On Fedora Workstation, run `sudo dnf install ./cadence-0.1.2-fedora-x86_64.rpm` from the download directory. For portable use on Linux, mark the `.AppImage` executable and open it directly.
 
 Drag the CADENCE header to move the desktop window. The minimize and close buttons are at the top right.
 

@@ -31,6 +31,7 @@ declare global {
 }
 
 const VIEW_INDEX: Record<View, number> = { player: 0, eq: 1, playlist: 2 };
+const EQ_PROFILES = Object.entries(PRESETS);
 const subscribeToWindowControls = () => () => {};
 
 function isTypingTarget(target: EventTarget | null) {
@@ -481,21 +482,25 @@ function Equalizer() {
   const bands = useDesk((s) => s.bands);
   const setBand = useDesk((s) => s.setBand);
   const applyPreset = useDesk((s) => s.applyPreset);
+  const activeProfile = EQ_PROFILES.find(([, gains]) =>
+    gains.length === bands.length && gains.every((gain, index) => gain === bands[index]),
+  )?.[0] ?? "";
 
   return (
     <div className="min-w-0">
-      <div className="mb-2 flex flex-wrap gap-1">
-        {Object.keys(PRESETS).map((name) => (
-          <button
-            key={name}
-            type="button"
-            onClick={() => applyPreset(name)}
-            className="min-h-9 rounded-sm px-2 font-mono text-[11px] uppercase tracking-wide text-muted hover:text-fg"
-          >
-            {name}
-          </button>
-        ))}
-      </div>
+      <label className="mb-4 flex items-center gap-3">
+        <span className="shrink-0 text-sm text-muted">EQ profile</span>
+        <select
+          value={activeProfile}
+          onChange={(event) => applyPreset(event.currentTarget.value)}
+          className="min-h-10 min-w-0 flex-1 rounded-sm border border-line bg-lcd px-2 text-sm text-fg scheme-dark"
+        >
+          <option value="" disabled>Custom</option>
+          {EQ_PROFILES.map(([name]) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+        </select>
+      </label>
       <div className="grid grid-cols-10 gap-px">
         {BANDS.map((freq, index) => (
           <VSlider
@@ -546,6 +551,7 @@ function VSlider({
         aria-valuemin={min}
         aria-valuemax={max}
         aria-valuenow={value}
+        aria-valuetext={`${value} dB`}
         aria-orientation="vertical"
         className="relative h-24 w-full touch-none"
         onPointerDown={(event) => {
