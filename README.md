@@ -10,7 +10,7 @@ Audio files stay in this browser (IndexedDB). Nothing is uploaded.
 
 - Drop audio onto the desk, or use the upload button. mp3, wav, ogg, flac, m4a.
 - Three short original pieces are generated the first time the library is empty.
-- Space plays and pauses. Arrow keys seek; shift-arrows change tracks. Up and down change volume. `M` mutes, `S` shuffles, `R` cycles repeat. `E` and `P` open the equalizer and playlist windows. Double-click a window bar to shade it.
+- Space plays and pauses. Arrow keys seek; shift-arrows change tracks. Up and down change volume. `M` mutes, `S` shuffles, `R` cycles repeat. `E` and `P` open the equalizer and playlist windows. `K` opens skins. Double-click a window bar to shade it.
 
 ## Run
 

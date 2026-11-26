@@ -1,10 +1,10 @@
+import type { SkinId, SkinTokens } from "./skins";
+
 export const BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
 
 export const BAND_LABELS = ["32", "64", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"] as const;
 
 export type RepeatMode = "off" | "all" | "one";
-
-export type Finish = "carbon" | "brass";
 
 export type TrackMeta = {
   id: string;
@@ -23,7 +23,8 @@ export type Settings = {
   shuffle: boolean;
   repeat: RepeatMode;
   bands: number[];
-  finish: Finish;
+  skin: SkinId;
+  custom: SkinTokens | null;
 };
 
 export const PRESETS: Record<string, number[]> = {
@@ -39,7 +40,8 @@ export const DEFAULT_SETTINGS: Settings = {
   shuffle: false,
   repeat: "off",
   bands: PRESETS.Flat.slice(),
-  finish: "carbon",
+  skin: "carbon",
+  custom: null,
 };
 
 export function formatTime(seconds: number): string {

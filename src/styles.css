@@ -13,15 +13,11 @@
   --color-copper: #e07840;
   --color-line: #3d362e;
   --color-lcd: #100e0c;
-}
-
-[data-finish="brass"] {
-  --color-bg: #16130e;
-  --color-panel: #261f16;
-  --color-raised: #342a1c;
-  --color-copper: #d4a054;
-  --color-line: #4a3c28;
-  --color-lcd: #120e09;
+  --color-lcd-ink: #e07840;
+  --color-pl: #f3ece2;
+  --color-pl-current: #e07840;
+  --color-pl-bg: #100e0c;
+  --color-pl-selected: #2a2118;
 }
 
 @layer base {
@@ -37,6 +33,8 @@
     color: var(--color-fg);
     font-family: var(--font-sans);
     min-height: 100%;
+    --vis-lo: #6a3018;
+    --vis-hi: #ffb080;
   }
 
   body {

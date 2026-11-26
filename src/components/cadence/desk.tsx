@@ -17,28 +17,33 @@ import {
 } from "lucide-react";
 import { engine } from "@/lib/cadence/engine";
 import { useDesk } from "@/lib/cadence/store";
-import { BAND_LABELS, BANDS, PRESETS, formatTime, type Finish } from "@/lib/cadence/types";
+import { BAND_LABELS, BANDS, PRESETS, formatTime } from "@/lib/cadence/types";
+import { SKINS, resolveTokens, type SkinTokens } from "@/lib/cadence/skins";
 
 const PANES_KEY = "cadence-panes";
 
 type Panes = {
   eq: boolean;
   pl: boolean;
+  sk: boolean;
   shadeMain: boolean;
   shadeEq: boolean;
   shadePl: boolean;
+  shadeSk: boolean;
 };
 
 function loadPanes(): Panes {
-  const base: Panes = { eq: true, pl: true, shadeMain: false, shadeEq: false, shadePl: false };
+  const base: Panes = { eq: true, pl: true, sk: false, shadeMain: false, shadeEq: false, shadePl: false, shadeSk: false };
   try {
     const raw = JSON.parse(localStorage.getItem(PANES_KEY) || "") as Partial<Panes>;
     return {
       eq: raw.eq !== false,
       pl: raw.pl !== false,
+      sk: Boolean(raw.sk),
       shadeMain: Boolean(raw.shadeMain),
       shadeEq: Boolean(raw.shadeEq),
       shadePl: Boolean(raw.shadePl),
+      shadeSk: Boolean(raw.shadeSk),
     };
   } catch {
     return base;
@@ -66,7 +71,15 @@ export function Desk() {
   const toggleShuffle = useDesk((s) => s.toggleShuffle);
   const cycleRepeat = useDesk((s) => s.cycleRepeat);
   const [dragOver, setDragOver] = useState(false);
-  const [panes, setPanes] = useState<Panes>({ eq: true, pl: true, shadeMain: false, shadeEq: false, shadePl: false });
+  const [panes, setPanes] = useState<Panes>({
+    eq: true,
+    pl: true,
+    sk: false,
+    shadeMain: false,
+    shadeEq: false,
+    shadePl: false,
+    shadeSk: false,
+  });
   const panesLoaded = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -94,6 +107,10 @@ export function Desk() {
 
   function togglePl() {
     setPanes((current) => ({ ...current, pl: !current.pl, shadePl: current.pl ? current.shadePl : false }));
+  }
+
+  function toggleSk() {
+    setPanes((current) => ({ ...current, sk: !current.sk, shadeSk: current.sk ? current.shadeSk : false }));
   }
 
   useEffect(() => {
@@ -126,6 +143,8 @@ export function Desk() {
         toggleEq();
       } else if (event.key === "p") {
         togglePl();
+      } else if (event.key === "k") {
+        toggleSk();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -151,7 +170,7 @@ export function Desk() {
           title="CADENCE"
           shaded={panes.shadeMain}
           onToggleShade={() => patch({ shadeMain: !panes.shadeMain })}
-          extra={<FinishToggle />}
+          extra={<SkinButton open={panes.sk} onClick={toggleSk} />}
         >
           <Transport
             eqOpen={panes.eq}
@@ -170,6 +189,17 @@ export function Desk() {
             onClose={() => patch({ eq: false })}
           >
             <Equalizer />
+          </Compartment>
+        ) : null}
+
+        {panes.sk ? (
+          <Compartment
+            title="SKINS"
+            shaded={panes.shadeSk}
+            onToggleShade={() => patch({ shadeSk: !panes.shadeSk })}
+            onClose={() => patch({ sk: false })}
+          >
+            <SkinBrowser />
           </Compartment>
         ) : null}
 
@@ -264,24 +294,91 @@ function Compartment({
   );
 }
 
-function FinishToggle() {
-  const finish = useDesk((s) => s.finish);
-  const setFinish = useDesk((s) => s.setFinish);
-  const options: Finish[] = ["carbon", "brass"];
+function SkinButton({ open, onClick }: { open: boolean; onClick: () => void }) {
   return (
-    <div className="flex" onDoubleClick={(event) => event.stopPropagation()}>
-      {options.map((option) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={finish === option}
-          onClick={() => setFinish(option)}
-          className={`px-1.5 font-mono text-[10px] uppercase tracking-wider ${finish === option ? "text-copper" : "text-muted"}`}
-        >
-          {option}
-        </button>
-      ))}
+    <button
+      type="button"
+      aria-pressed={open}
+      onClick={onClick}
+      onDoubleClick={(event) => event.stopPropagation()}
+      className={`ml-1 font-mono text-[10px] uppercase tracking-wider ${open ? "text-copper" : "text-muted"}`}
+    >
+      Skin
+    </button>
+  );
+}
+
+const PAINTS: { key: keyof SkinTokens; label: string }[] = [
+  { key: "accent", label: "Accent" },
+  { key: "lcd", label: "LCD" },
+  { key: "lcdText", label: "Digits" },
+  { key: "pl", label: "List" },
+  { key: "plCurrent", label: "Now" },
+  { key: "visLo", label: "Vis low" },
+  { key: "visHi", label: "Vis high" },
+];
+
+function SkinBrowser() {
+  const skin = useDesk((s) => s.skin);
+  const custom = useDesk((s) => s.custom);
+  const setSkin = useDesk((s) => s.setSkin);
+  const paint = useDesk((s) => s.paint);
+  const tokens = resolveTokens(skin, custom);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        {SKINS.map((entry) => (
+          <SkinRow key={entry.id} name={entry.name} tokens={entry.tokens} pressed={skin === entry.id} onClick={() => setSkin(entry.id)} />
+        ))}
+        <SkinRow name="Custom" tokens={custom ?? tokens} pressed={skin === "custom"} onClick={() => setSkin("custom")} />
+      </div>
+      <div className="grid grid-cols-4 gap-2">
+        {PAINTS.map((field) => (
+          <label key={field.key} className="flex min-w-0 flex-col gap-1">
+            <span className="truncate font-mono text-[10px] uppercase tracking-wide text-muted">{field.label}</span>
+            <input
+              type="color"
+              aria-label={field.label}
+              value={tokens[field.key]}
+              onChange={(event) => paint(field.key, event.target.value)}
+              className="h-8 w-full cursor-pointer border border-line bg-transparent"
+            />
+          </label>
+        ))}
+      </div>
+      <p className="font-mono text-[10px] leading-4 text-muted">
+        A classic skin was a zip of window art plus two text files: playlist colors, and the 24 analyzer colors. These controls are those files. The pictures are not loaded.
+      </p>
     </div>
+  );
+}
+
+function SkinRow({
+  name,
+  tokens,
+  pressed,
+  onClick,
+}: {
+  name: string;
+  tokens: SkinTokens;
+  pressed: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={`flex min-h-9 w-full items-center gap-3 border-t border-line px-1 text-left ${pressed ? "bg-raised" : ""}`}
+    >
+      <span className={`w-20 font-mono text-[11px] uppercase tracking-wide ${pressed ? "text-copper" : "text-fg"}`}>{name}</span>
+      <span className="flex h-3 min-w-0 flex-1 overflow-hidden" aria-hidden>
+        {[tokens.panel, tokens.lcd, tokens.lcdText, tokens.accent, tokens.visLo, tokens.visHi, tokens.plBg, tokens.plCurrent].map((color, index) => (
+          <span key={index} className="h-full flex-1" style={{ background: color }} />
+        ))}
+      </span>
+    </button>
   );
 }
 
@@ -322,7 +419,7 @@ function Transport({
     <div className="flex min-w-0 flex-col gap-3">
       <div className="rounded-sm bg-lcd px-3 py-2">
         <div className="flex items-baseline justify-between gap-3">
-          <p className="font-mono text-2xl text-copper">{formatTime(currentTime)}</p>
+          <p className="font-mono text-2xl" style={{ color: "var(--color-lcd-ink)" }}>{formatTime(currentTime)}</p>
           <p className="font-mono text-xs text-muted">{formatTime(shownDuration)}</p>
         </div>
         <p className="truncate text-sm">{current?.title ?? "Nothing queued"}</p>
@@ -456,8 +553,12 @@ function Scope({ active }: { active: boolean }) {
       {levels.map((level, index) => (
         <span
           key={index}
-          className="min-w-0 flex-1 bg-copper"
-          style={{ height: `${Math.max(8, level * 100)}%`, opacity: 0.35 + level * 0.65 }}
+          className="min-w-0 flex-1"
+          style={{
+            height: `${Math.max(8, level * 100)}%`,
+            opacity: 0.45 + level * 0.55,
+            background: "linear-gradient(to top, var(--vis-lo), var(--vis-hi))",
+          }}
         />
       ))}
     </div>
@@ -592,15 +693,22 @@ function Playlist() {
           {tracks.length === 0 ? "Drop audio onto the desk, or use the upload button." : "Nothing matches that filter."}
         </p>
       ) : (
-        <ul className="min-h-0 flex-1 overflow-y-auto">
+        <ul className="min-h-0 flex-1 overflow-y-auto" style={{ background: "var(--color-pl-bg)" }}>
           {shown.map((track, index) => {
             const active = track.id === currentId;
             return (
-              <li key={track.id} className={`flex items-center gap-1 border-t border-line ${active ? "bg-raised" : ""}`}>
+              <li
+                key={track.id}
+                className="flex items-center gap-1 border-t border-line"
+                style={{
+                  background: active ? "var(--color-pl-selected)" : "transparent",
+                  color: active ? "var(--color-pl-current)" : "var(--color-pl)",
+                }}
+              >
                 <button
                   type="button"
                   onClick={() => void playId(track.id)}
-                  className={`flex min-h-10 min-w-0 flex-1 items-center gap-2 px-1 text-left text-sm ${active ? "text-copper" : "text-fg"}`}
+                  className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-1 text-left text-sm text-inherit"
                 >
                   <span className="w-5 font-mono text-[10px] text-muted">{index + 1}</span>
                   <span className="min-w-0 flex-1 truncate">{track.title}</span>

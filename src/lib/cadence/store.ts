@@ -6,11 +6,11 @@ import {
   DEFAULT_SETTINGS,
   PRESETS,
   stripExt,
-  type Finish,
   type RepeatMode,
   type Settings,
   type TrackMeta,
 } from "./types";
+import { applySkin, isSkinId, parseTokens, resolveTokens, type SkinId, type SkinTokens } from "./skins";
 
 const SETTINGS_KEY = "cadence-settings";
 const SEEDED_KEY = "cadence-seeded-v2";
@@ -29,7 +29,8 @@ type DeskState = {
   shuffle: boolean;
   repeat: RepeatMode;
   bands: number[];
-  finish: Finish;
+  skin: SkinId;
+  custom: SkinTokens | null;
   query: string;
   ready: boolean;
   busy: boolean;
@@ -49,38 +50,43 @@ type DeskState = {
   setBand: (index: number, gain: number) => void;
   applyPreset: (name: string) => void;
   setQuery: (query: string) => void;
-  setFinish: (finish: Finish) => void;
+  setSkin: (skin: SkinId) => void;
+  paint: (key: keyof SkinTokens, value: string) => void;
 };
 
 function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS, bands: DEFAULT_SETTINGS.bands.slice() };
-    const parsed = JSON.parse(raw) as Partial<Settings>;
+    const parsed = JSON.parse(raw) as Partial<Settings> & { finish?: string };
     const bands = Array.isArray(parsed.bands) && parsed.bands.length === 10
       ? parsed.bands.map((n) => Number(n) || 0)
       : DEFAULT_SETTINGS.bands.slice();
+    const legacy = parsed.finish === "brass" ? "brass" : "carbon";
+    const skin = isSkinId(parsed.skin) ? parsed.skin : legacy;
     return {
       volume: typeof parsed.volume === "number" ? parsed.volume : DEFAULT_SETTINGS.volume,
       muted: Boolean(parsed.muted),
       shuffle: Boolean(parsed.shuffle),
       repeat: parsed.repeat === "all" || parsed.repeat === "one" ? parsed.repeat : "off",
       bands,
-      finish: parsed.finish === "brass" ? "brass" : "carbon",
+      skin,
+      custom: parseTokens(parsed.custom),
     };
   } catch {
     return { ...DEFAULT_SETTINGS, bands: DEFAULT_SETTINGS.bands.slice() };
   }
 }
 
-function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "repeat" | "bands" | "finish">) {
+function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "repeat" | "bands" | "skin" | "custom">) {
   const settings: Settings = {
     volume: state.volume,
     muted: state.muted,
     shuffle: state.shuffle,
     repeat: state.repeat,
     bands: state.bands,
-    finish: state.finish,
+    skin: state.skin,
+    custom: state.custom,
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
@@ -168,7 +174,7 @@ export const useDesk = create<DeskState>((set, get) => {
       const settings = loadSettings();
       set({ ...settings, busy: true, error: null });
       applyAudio();
-      document.documentElement.dataset.finish = settings.finish;
+      applySkin(resolveTokens(settings.skin, settings.custom));
       try {
         let tracks = await listTracks();
         if (tracks.length === 0 && !localStorage.getItem(SEEDED_KEY)) {
@@ -361,9 +367,18 @@ export const useDesk = create<DeskState>((set, get) => {
 
     setQuery: (query) => set({ query }),
 
-    setFinish: (finish) => {
-      document.documentElement.dataset.finish = finish;
-      set({ finish });
+    setSkin: (skin) => {
+      const custom = skin === "custom" ? get().custom ?? resolveTokens(get().skin, get().custom) : get().custom;
+      applySkin(resolveTokens(skin, custom));
+      set({ skin, custom });
+      saveSettings(get());
+    },
+
+    paint: (key, value) => {
+      if (!/^#[0-9a-fA-F]{6}$/.test(value)) return;
+      const custom = { ...resolveTokens(get().skin, get().custom), [key]: value };
+      applySkin(custom);
+      set({ skin: "custom", custom });
       saveSettings(get());
     },
   };
