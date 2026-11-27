@@ -8,6 +8,8 @@ export type RepeatMode = "off" | "all" | "one";
 
 export type TransitionSpeed = "off" | "quick" | "normal" | "smooth";
 
+export type WindowSizing = "fit" | "fill";
+
 export type TrackMeta = {
   id: string;
   title: string;
@@ -28,6 +30,7 @@ export type Settings = {
   skin: SkinId;
   custom: SkinTokens | null;
   transitionSpeed: TransitionSpeed;
+  windowSizing: WindowSizing;
 };
 
 export const PRESETS: Readonly<Record<string, readonly number[]>> = {
@@ -53,6 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   skin: "carbon",
   custom: null,
   transitionSpeed: "normal",
+  windowSizing: "fit",
 };
 
 export function formatTime(seconds: number): string {

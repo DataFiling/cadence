@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import {
+  Maximize2,
   Minus,
   PanelTopClose,
   PanelTopOpen,
@@ -19,7 +20,7 @@ import {
 } from "lucide-react";
 import { engine } from "@/lib/cadence/engine";
 import { useDesk } from "@/lib/cadence/store";
-import { BAND_LABELS, BANDS, PRESETS, formatTime, type TransitionSpeed } from "@/lib/cadence/types";
+import { BAND_LABELS, BANDS, PRESETS, formatTime, type TransitionSpeed, type WindowSizing } from "@/lib/cadence/types";
 import { SkinMenu } from "./skin-menu";
 import { CADENCE_VIEWS, ViewTitle, type CadenceView } from "./view-title";
 
@@ -30,12 +31,28 @@ const COMPACT_PANELS = [
   { key: "playlist", label: "Playlist", short: "PL" },
 ] as const;
 
+type DefaultPlayerStatus = {
+  supported: boolean;
+  platform: string;
+  mode: "direct" | "system-settings" | "manual";
+  isDefault: boolean | null;
+};
+
+type DefaultPlayerResult = {
+  ok: boolean;
+  isDefault: boolean | null;
+  message: string;
+};
+
 type DesktopWindowControls = {
   minimize: () => void;
   close: () => void;
   setCompactMode?: (compact: boolean, panels?: CompactPanels) => void;
+  resizeToContent?: (width: number, height: number) => void;
   getOpenFilesInExistingPlayer?: () => Promise<boolean>;
   setOpenFilesInExistingPlayer?: (enabled: boolean) => Promise<boolean>;
+  getDefaultPlayerStatus?: () => Promise<DefaultPlayerStatus>;
+  setAsDefaultPlayer?: () => Promise<DefaultPlayerResult>;
   onOpenFiles?: (listener: (files: { name: string; url: string }[]) => void) => () => void;
 };
 
@@ -46,6 +63,7 @@ declare global {
 }
 
 const VIEW_INDEX: Record<CadenceView, number> = { player: 0, eq: 1, playlist: 2 };
+const OPTIMAL_VIEW_WIDTH: Record<CadenceView, number> = { player: 460, eq: 520, playlist: 480 };
 const EQ_PROFILES = Object.entries(PRESETS);
 const subscribeToWindowControls = () => () => {};
 
@@ -78,13 +96,20 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
   const toggleShuffle = useDesk((s) => s.toggleShuffle);
   const cycleRepeat = useDesk((s) => s.cycleRepeat);
   const transitionSpeed = useDesk((s) => s.transitionSpeed);
+  const windowSizing = useDesk((s) => s.windowSizing);
+  const setWindowSizing = useDesk((s) => s.setWindowSizing);
   const [dragOver, setDragOver] = useState(false);
   const [view, setView] = useState<CadenceView>("player");
   const [compact, setCompact] = useState(false);
   const [compactPanels, setCompactPanels] = useState<CompactPanels>({ equalizer: false, playlist: false });
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const fileActionRef = useRef<"open" | "queue">("open");
+  const mainRef = useRef<HTMLElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
   const navRef = useRef<HTMLElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
+  const viewRefs = useRef<Record<CadenceView, HTMLElement | null>>({ player: null, eq: null, playlist: null });
   const settingsRef = useRef<HTMLDetailsElement>(null);
   const skinsRef = useRef<HTMLDetailsElement>(null);
   const compactToggleRef = useRef<HTMLButtonElement>(null);
@@ -206,6 +231,54 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [changeCompactMode, compact, cycleRepeat, next, prev, seek, setVolume, switchView, toggle, toggleMute, toggleShuffle]);
 
+  const isFit = !compact && windowSizing === "fit";
+
+  const syncOptimalSize = useCallback((targetView: CadenceView, forceDesktopResize = false) => {
+    if (compact) return;
+    const section = viewRefs.current[targetView];
+    if (!section) return;
+    const headerH = headerRef.current?.offsetHeight ?? 48;
+    const navH = navRef.current?.offsetHeight ?? 48;
+    const footerH = footerRef.current?.offsetHeight ?? 0;
+    const mainStyle = mainRef.current ? getComputedStyle(mainRef.current) : null;
+    const padY = mainStyle
+      ? (parseFloat(mainStyle.paddingTop) || 0) + (parseFloat(mainStyle.paddingBottom) || 0)
+      : 0;
+    const chromeH = headerH + navH + footerH + padY + 4;
+    const contentH = Math.ceil(section.scrollHeight);
+    const maxViewportH = Math.max(240, window.innerHeight - chromeH);
+    setViewportHeight(Math.min(contentH, maxViewportH));
+
+    if ((windowSizing === "fit" || forceDesktopResize) && windowControls?.resizeToContent) {
+      windowControls.resizeToContent(OPTIMAL_VIEW_WIDTH[targetView], Math.ceil(contentH + chromeH));
+    }
+  }, [compact, windowControls, windowSizing]);
+
+  const fitWindowToView = useCallback(() => {
+    if (windowSizing !== "fit") setWindowSizing("fit");
+    if (settingsRef.current) settingsRef.current.open = false;
+    requestAnimationFrame(() => syncOptimalSize(view, true));
+  }, [setWindowSizing, syncOptimalSize, view, windowSizing]);
+
+  useLayoutEffect(() => {
+    if (compact || windowSizing !== "fit") {
+      setViewportHeight(null);
+      return;
+    }
+    syncOptimalSize(view);
+    const section = viewRefs.current[view];
+    const observer = typeof ResizeObserver !== "undefined" && section
+      ? new ResizeObserver(() => syncOptimalSize(view))
+      : null;
+    if (observer && section) observer.observe(section);
+    const onResize = () => syncOptimalSize(view);
+    window.addEventListener("resize", onResize);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", onResize);
+    };
+  }, [compact, syncOptimalSize, view, windowSizing]);
+
   const deskLayout = desktopLayout ? "bg-panel" : "mx-auto max-w-[34rem] px-2 py-3 sm:px-4 sm:py-6";
   const panelFrame = desktopLayout ? "" : "rounded-lg border border-line shadow-2xl";
   const dropOutlineOffset = desktopLayout ? "-outline-offset-2" : "outline-offset-2";
@@ -214,8 +287,10 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
 
   return (
     <main
+      ref={mainRef}
       data-transition-speed={transitionSpeed}
-      className={`flex w-full flex-col overflow-hidden ${!compact || desktopLayout ? "h-dvh" : ""} ${deskLayout}`}
+      data-window-sizing={compact ? "fill" : windowSizing}
+      className={`flex w-full flex-col ${isFit ? (desktopLayout ? "min-h-dvh overflow-hidden" : "min-h-dvh justify-center") : `overflow-hidden ${!compact || desktopLayout ? "h-dvh" : ""}`} ${deskLayout}`}
       onDragOver={(event) => {
         event.preventDefault();
         setDragOver(true);
@@ -227,8 +302,8 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
         void addFiles([...event.dataTransfer.files]);
       }}
     >
-      <div className={`flex min-h-0 flex-1 flex-col overflow-hidden bg-panel ${panelFrame} ${dragOver ? `outline outline-2 outline-copper ${dropOutlineOffset}` : ""}`}>
-        <header className={`relative flex shrink-0 items-center gap-2 border-b border-line bg-raised px-3 ${compact ? "h-9" : "h-12"} ${desktopLayout ? "cadence-titlebar" : ""}`}>
+      <div className={`flex min-h-0 flex-col bg-panel ${isFit ? "overflow-visible" : "flex-1 overflow-hidden"} ${panelFrame} ${dragOver ? `outline outline-2 outline-copper ${dropOutlineOffset}` : ""}`}>
+        <header ref={headerRef} className={`relative flex shrink-0 items-center gap-2 border-b border-line bg-raised px-3 ${!desktopLayout && isFit ? "rounded-t-lg" : ""} ${compact ? "h-9" : "h-12"} ${desktopLayout ? "cadence-titlebar" : ""}`}>
           <span className="size-2 shrink-0 rounded-full bg-copper" aria-hidden="true" />
           <h1 className="font-mono text-sm tracking-[0.18em] text-fg">CADENCE</h1>
           <div className="cadence-titlebar-controls ml-auto flex shrink-0 items-center gap-2">
@@ -255,9 +330,15 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
                 <SkinMenu refElement={skinsRef} onOpen={() => {
                   if (settingsRef.current) settingsRef.current.open = false;
                 }} />
-                <PlayerSettings refElement={settingsRef} windowControls={windowControls} onOpen={() => {
-                  if (skinsRef.current) skinsRef.current.open = false;
-                }} />
+                <PlayerSettings
+                  refElement={settingsRef}
+                  windowControls={windowControls}
+                  currentView={view}
+                  onFitWindow={fitWindowToView}
+                  onOpen={() => {
+                    if (skinsRef.current) skinsRef.current.open = false;
+                  }}
+                />
               </>
             )}
             <button
@@ -311,24 +392,46 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
               ))}
             </nav>
 
-            <div className="cadence-viewport min-h-0 flex-1 overflow-clip bg-panel">
+            <div
+              className={`cadence-viewport min-h-0 overflow-clip bg-panel ${!desktopLayout && isFit ? "rounded-b-lg" : ""} ${isFit ? "" : "flex-1"}`}
+              style={isFit && viewportHeight !== null ? { height: `${viewportHeight}px` } : undefined}
+            >
               <div className="cadence-view-track flex h-full" style={{ transform: `translateX(-${VIEW_INDEX[view] * 100}%)` }}>
-                <section id="view-player" aria-hidden={view !== "player"} inert={view !== "player"} className="cadence-view">
+                <section
+                  ref={(el) => { viewRefs.current.player = el; }}
+                  id="view-player"
+                  aria-hidden={view !== "player"}
+                  inert={view !== "player"}
+                  className="cadence-view"
+                >
                   <ViewTitle view="player" active={view === "player"} />
                   <Transport
                     onToggleEq={() => switchView("eq")}
                     onTogglePl={() => switchView("playlist")}
                     onOpen={() => chooseAudio("open")}
                   />
-                  <p className="mt-auto pt-5 font-mono text-xs text-muted">Drop audio anywhere on the desk to open it.</p>
+                  <p className={`font-mono text-xs text-muted ${isFit ? "mt-4 border-t border-line/60 pt-3" : "mt-auto pt-5"}`}>Drop audio anywhere on the desk to open it.</p>
                 </section>
 
-                <section id="view-eq" aria-label="Equalizer" aria-hidden={view !== "eq"} inert={view !== "eq"} className="cadence-view">
+                <section
+                  ref={(el) => { viewRefs.current.eq = el; }}
+                  id="view-eq"
+                  aria-label="Equalizer"
+                  aria-hidden={view !== "eq"}
+                  inert={view !== "eq"}
+                  className="cadence-view"
+                >
                   <ViewTitle view="eq" active={view === "eq"} />
                   <Equalizer />
                 </section>
 
-                <section id="view-playlist" aria-hidden={view !== "playlist"} inert={view !== "playlist"} className="cadence-view">
+                <section
+                  ref={(el) => { viewRefs.current.playlist = el; }}
+                  id="view-playlist"
+                  aria-hidden={view !== "playlist"}
+                  inert={view !== "playlist"}
+                  className="cadence-view"
+                >
                   <ViewTitle view="playlist" active={view === "playlist"} />
                   <Playlist onAdd={() => chooseAudio("queue")} />
                 </section>
@@ -339,7 +442,7 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
       </div>
 
       {!compact && (
-        <div className={desktopLayout ? "shrink-0 px-4 [&>p:last-child]:pb-2" : "shrink-0"}>
+        <div ref={footerRef} className={desktopLayout ? "shrink-0 px-4 [&>p:last-child]:pb-2" : "shrink-0"}>
           {(busy || !desktopLayout) && (
             <p className="mt-2 font-mono text-xs text-muted">
               {busy ? "Working the library…" : "One desk · E for EQ · P for playlist · Esc for player"}
@@ -415,10 +518,14 @@ function CompactPanel({
 function PlayerSettings({
   refElement,
   windowControls,
+  currentView,
+  onFitWindow,
   onOpen,
 }: {
   refElement: RefObject<HTMLDetailsElement | null>;
   windowControls?: DesktopWindowControls;
+  currentView: CadenceView;
+  onFitWindow: () => void;
   onOpen: () => void;
 }) {
   const playOpenedFiles = useDesk((s) => s.playOpenedFiles);
@@ -427,10 +534,22 @@ function PlayerSettings({
   const setQueueOpenedFiles = useDesk((s) => s.setQueueOpenedFiles);
   const transitionSpeed = useDesk((s) => s.transitionSpeed);
   const setTransitionSpeed = useDesk((s) => s.setTransitionSpeed);
-  const { getOpenFilesInExistingPlayer, setOpenFilesInExistingPlayer } = windowControls ?? {};
+  const windowSizing = useDesk((s) => s.windowSizing);
+  const setWindowSizing = useDesk((s) => s.setWindowSizing);
+  const viewLabel = CADENCE_VIEWS[currentView].label;
+  const {
+    getOpenFilesInExistingPlayer,
+    setOpenFilesInExistingPlayer,
+    getDefaultPlayerStatus,
+    setAsDefaultPlayer,
+  } = windowControls ?? {};
   const [reuseWindow, setReuseWindow] = useState<boolean | null>(null);
   const [reusePending, setReusePending] = useState(false);
   const [reuseError, setReuseError] = useState("");
+  const [defaultStatus, setDefaultStatus] = useState<DefaultPlayerStatus | null>(null);
+  const [defaultPending, setDefaultPending] = useState(false);
+  const [defaultMessage, setDefaultMessage] = useState("");
+  const [defaultError, setDefaultError] = useState(false);
 
   async function syncFileWindowSetting(enabled?: boolean) {
     if (!getOpenFilesInExistingPlayer || !setOpenFilesInExistingPlayer || reusePending) return;
@@ -448,11 +567,49 @@ function PlayerSettings({
     }
   }
 
+  async function syncDefaultPlayerStatus() {
+    if (!getDefaultPlayerStatus) return;
+    try {
+      setDefaultStatus(await getDefaultPlayerStatus());
+    } catch {
+      // Keep the action available even if status probing fails.
+    }
+  }
+
+  async function handleSetDefaultPlayer() {
+    if (!setAsDefaultPlayer || defaultPending) return;
+    setDefaultPending(true);
+    setDefaultMessage("");
+    setDefaultError(false);
+    try {
+      const result = await setAsDefaultPlayer();
+      setDefaultMessage(result.message);
+      setDefaultError(!result.ok);
+      if (result.isDefault !== null) {
+        setDefaultStatus((current) => current ? { ...current, isDefault: result.isDefault } : current);
+      }
+    } catch {
+      setDefaultMessage("Couldn’t update default audio player.");
+      setDefaultError(true);
+    } finally {
+      setDefaultPending(false);
+    }
+  }
+
+  const defaultButtonLabel = defaultPending
+    ? "Updating default…"
+    : defaultStatus?.isDefault
+      ? "Default audio player ✓"
+      : defaultStatus?.mode === "system-settings"
+        ? "Set as default player…"
+        : "Set as default player";
+
   return (
     <details ref={refElement} className="z-10" onToggle={(event) => {
       if (event.currentTarget.open) {
         onOpen();
         void syncFileWindowSetting();
+        void syncDefaultPlayerStatus();
       }
     }}>
       <summary aria-label="Player settings" title="Player settings" className="flex size-9 list-none items-center justify-center rounded-sm border border-line text-muted hover:text-fg [&::-webkit-details-marker]:hidden">
@@ -491,8 +648,48 @@ function PlayerSettings({
           />
           Automatically add opened files to the playlist
         </label>
+        {setAsDefaultPlayer && (
+          <div className="mb-4">
+            <button
+              type="button"
+              disabled={defaultPending}
+              onClick={() => void handleSetDefaultPlayer()}
+              className={`min-h-9 w-full rounded-sm border px-3 font-mono text-xs uppercase tracking-wider transition-colors ${defaultStatus?.isDefault ? "border-copper/60 bg-lcd text-copper" : "border-line bg-panel text-fg hover:border-copper hover:text-copper"} disabled:opacity-60`}
+            >
+              {defaultButtonLabel}
+            </button>
+            {defaultMessage && (
+              <p role="status" className={`mt-1.5 text-xs leading-5 ${defaultError ? "text-copper" : "text-muted"}`}>
+                {defaultMessage}
+              </p>
+            )}
+          </div>
+        )}
         <div className="mb-4 border-t border-line" />
         <p className="mb-3 font-mono text-xs uppercase tracking-widest text-copper">Appearance</p>
+        <label htmlFor="window-sizing" className="block text-sm font-medium">Window size</label>
+        <p className="mb-2 text-xs leading-5 text-muted">Fit the desk to Player, EQ, and Playlist without extra empty space.</p>
+        <select
+          id="window-sizing"
+          value={windowSizing}
+          onChange={(event) => {
+            const next = event.target.value as WindowSizing;
+            setWindowSizing(next);
+            if (next === "fit") onFitWindow();
+          }}
+          className="min-h-10 w-full rounded-sm border border-line bg-lcd px-2 text-sm text-lcd-ink scheme-dark"
+        >
+          <option value="fit">Fit to view — optimal (default)</option>
+          <option value="fill">Fill window — full height</option>
+        </select>
+        <button
+          type="button"
+          onClick={onFitWindow}
+          className="mt-2 mb-4 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-sm border border-line bg-panel px-3 font-mono text-xs uppercase tracking-wider text-fg hover:border-copper hover:text-copper"
+        >
+          <Maximize2 className="size-3.5" aria-hidden="true" />
+          Fit to {viewLabel} now
+        </button>
         <label htmlFor="transition-speed" className="block text-sm font-medium">Transition speed</label>
         <p className="mb-2 text-xs leading-5 text-muted">Choose how quickly Cadence moves between Player, Playlist, and EQ.</p>
         <select

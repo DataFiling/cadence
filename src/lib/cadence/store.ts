@@ -12,6 +12,7 @@ import {
   type StoredTrack,
   type TrackMeta,
   type TransitionSpeed,
+  type WindowSizing,
 } from "./types";
 
 const SETTINGS_KEY = "cadence-settings";
@@ -39,6 +40,7 @@ type DeskState = {
   skin: SkinId;
   custom: SkinTokens | null;
   transitionSpeed: TransitionSpeed;
+  windowSizing: WindowSizing;
   playOpenedFiles: boolean;
   queueOpenedFiles: boolean;
   query: string;
@@ -64,6 +66,7 @@ type DeskState = {
   setSkin: (skin: SkinId) => void;
   paint: (key: keyof SkinTokens, value: string) => void;
   setTransitionSpeed: (speed: TransitionSpeed) => void;
+  setWindowSizing: (sizing: WindowSizing) => void;
   setPlayOpenedFiles: (enabled: boolean) => void;
   setQueueOpenedFiles: (enabled: boolean) => void;
 };
@@ -87,13 +90,14 @@ function loadSettings(): Settings {
       transitionSpeed: parsed.transitionSpeed === "off" || parsed.transitionSpeed === "quick" || parsed.transitionSpeed === "smooth"
         ? parsed.transitionSpeed
         : "normal",
+      windowSizing: parsed.windowSizing === "fill" ? "fill" : "fit",
     };
   } catch {
     return { ...DEFAULT_SETTINGS, bands: DEFAULT_SETTINGS.bands.slice() };
   }
 }
 
-function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "repeat" | "bands" | "skin" | "custom" | "transitionSpeed">) {
+function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "repeat" | "bands" | "skin" | "custom" | "transitionSpeed" | "windowSizing">) {
   const settings: Settings = {
     volume: state.volume,
     muted: state.muted,
@@ -103,6 +107,7 @@ function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "r
     skin: state.skin,
     custom: state.custom,
     transitionSpeed: state.transitionSpeed,
+    windowSizing: state.windowSizing,
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
@@ -526,6 +531,11 @@ export const useDesk = create<DeskState>((set, get) => {
 
     setTransitionSpeed: (transitionSpeed) => {
       set({ transitionSpeed });
+      saveSettings(get());
+    },
+
+    setWindowSizing: (windowSizing) => {
+      set({ windowSizing });
       saveSettings(get());
     },
 

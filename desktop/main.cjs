@@ -2,6 +2,7 @@ const { app, BrowserWindow, protocol, net, screen, shell } = require("electron")
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { AUDIO_PATH, audioPaths, selectedAudioFiles, createFilePreferences, createAudioTransfer } = require("./open-files.cjs");
+const { createDefaultPlayerManager } = require("./default-player.cjs");
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -23,10 +24,12 @@ const COMPACT_EQ_HEIGHT = 232;
 const COMPACT_PLAYLIST_HEIGHT = 252;
 const MIN_WINDOW_WIDTH = 360;
 const DEFAULT_WINDOW_WIDTH = 460;
+const MIN_EXPANDED_HEIGHT = 400;
 const localDevelopment = ["http:", "https:"].includes(appPage.protocol)
   && ["127.0.0.1", "[::1]", "localhost"].includes(appPage.hostname);
 const fileOpeningOrigin = appPage.href === "cadence://app/" ? "cadence://app" : localDevelopment ? appPage.origin : null;
 const filePreferences = createFilePreferences(app.getPath("userData"));
+const defaultPlayer = createDefaultPlayerManager({ openExternal: (url) => shell.openExternal(url) });
 const audioTransfer = createAudioTransfer(net, fileOpeningOrigin);
 const windowFiles = new WeakMap();
 let lastFocusedWindow;
@@ -109,6 +112,16 @@ function registerWindowControls(win) {
     if (action === "minimize") win.minimize();
     if (action === "close") win.close();
   });
+  win.webContents.ipc.on("cadence:resize-to-content", (event, width, height) => {
+    if (!isTrusted(event) || compactHeight || win.isDestroyed() || win.isFullScreen() || win.isMaximized()) return;
+    if (typeof width !== "number" || typeof height !== "number" || !Number.isFinite(width) || !Number.isFinite(height)) return;
+    const bounds = win.getBounds();
+    const { workArea } = screen.getDisplayMatching(bounds);
+    const targetW = Math.round(Math.min(Math.max(width, MIN_WINDOW_WIDTH), workArea.width));
+    const targetH = Math.round(Math.min(Math.max(height, MIN_EXPANDED_HEIGHT), workArea.height));
+    if (Math.abs(bounds.width - targetW) <= 1 && Math.abs(bounds.height - targetH) <= 1) return;
+    resizeInWorkArea(targetW, targetH, bounds, workArea);
+  });
   win.webContents.ipc.handle("cadence:get-open-file-preference", (event) => {
     if (!fileOpeningOrigin || !isTrusted(event)) throw new Error("File-opening preference unavailable");
     return filePreferences.get();
@@ -118,6 +131,14 @@ function registerWindowControls(win) {
       throw new Error("Invalid file-opening preference");
     }
     return filePreferences.set(enabled);
+  });
+  win.webContents.ipc.handle("cadence:get-default-player-status", (event) => {
+    if (!fileOpeningOrigin || !isTrusted(event)) throw new Error("Default-player status unavailable");
+    return defaultPlayer.getStatus();
+  });
+  win.webContents.ipc.handle("cadence:set-default-player", (event) => {
+    if (!fileOpeningOrigin || !isTrusted(event)) throw new Error("Default-player action unavailable");
+    return defaultPlayer.setAsDefault();
   });
 }
 
@@ -132,7 +153,7 @@ function createWindow() {
     width: DEFAULT_WINDOW_WIDTH,
     height: 780,
     minWidth: MIN_WINDOW_WIDTH,
-    minHeight: 640,
+    minHeight: MIN_EXPANDED_HEIGHT,
     frame: false,
     hasShadow: false,
     backgroundColor: "#14120f",
