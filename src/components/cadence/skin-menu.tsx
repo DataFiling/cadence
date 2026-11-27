@@ -50,7 +50,7 @@ export function SkinMenu({
               <input
                 type="color"
                 value={tokens[field.key]}
-                onChange={(event) => paint(field.key, event.currentTarget.value)}
+                onInput={(event) => paint(field.key, event.currentTarget.value)}
                 className="h-8 w-full border border-line bg-transparent"
               />
             </label>
