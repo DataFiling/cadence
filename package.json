@@ -1,6 +1,6 @@
 {
   "name": "cadence",
-  "version": "0.1.2",
+  "version": "0.1.6",
   "description": "Local music desk for the browser and the desktop.",
   "author": "DataFiling",
   "homepage": "https://github.com/DataFiling/cadence",
@@ -122,6 +122,7 @@
     },
     "files": [
       "desktop/main.cjs",
+      "desktop/open-files.cjs",
       "desktop/preload.cjs",
       "desktop-dist/**/*",
       "!node_modules/**"
@@ -131,12 +132,26 @@
       "target": ["zip", "AppImage", "deb"],
       "category": "AudioVideo",
       "synopsis": "Local music desk",
+      "mimeTypes": [
+        "audio/mpeg",
+        "audio/vnd.wave",
+        "audio/ogg",
+        "audio/x-vorbis+ogg",
+        "audio/flac",
+        "audio/mp4",
+        "audio/aac",
+        "audio/webm",
+        "video/webm",
+        "audio/x-opus+ogg"
+      ],
       "syncDesktopName": true
     },
     "deb": {
+      "executableArgs": ["%F"],
       "maintainer": "DataFiling <83735485+DataFiling@users.noreply.github.com>"
     },
     "rpm": {
+      "executableArgs": ["%F"],
       "artifactName": "cadence-${version}-fedora-${arch}.${ext}",
       "maintainer": "DataFiling <83735485+DataFiling@users.noreply.github.com>",
       "packageCategory": "Applications/Multimedia",
@@ -162,12 +177,19 @@
       "target": ["zip", "nsis"]
     },
     "nsis": {
-      "artifactName": "Cadence-${version}-windows-${arch}-setup.${ext}"
+      "artifactName": "Cadence-${version}-windows-${arch}-setup.${ext}",
+      "include": "file-associations.nsh"
     },
     "mac": {
       "artifactName": "CADENCE-${version}-mac.${ext}",
       "target": ["zip"],
       "category": "public.app-category.music",
+      "fileAssociations": {
+        "ext": ["mp3", "wav", "ogg", "flac", "m4a", "aac", "webm", "opus"],
+        "name": "Audio file",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
       "identity": null
     }
   }

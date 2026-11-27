@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import {
   Minus,
+  PanelTopClose,
+  PanelTopOpen,
   Pause,
   Play,
   Repeat,
@@ -18,19 +20,31 @@ import {
 import { engine } from "@/lib/cadence/engine";
 import { useDesk } from "@/lib/cadence/store";
 import { BAND_LABELS, BANDS, PRESETS, formatTime, type Finish, type TransitionSpeed } from "@/lib/cadence/types";
+import { CADENCE_VIEWS, ViewTitle, type CadenceView } from "./view-title";
 
-type View = "player" | "eq" | "playlist";
+type CompactPanels = { equalizer: boolean; playlist: boolean };
+
+const COMPACT_PANELS = [
+  { key: "equalizer", label: "Equalizer", short: "EQ" },
+  { key: "playlist", label: "Playlist", short: "PL" },
+] as const;
+
+type DesktopWindowControls = {
+  minimize: () => void;
+  close: () => void;
+  setCompactMode?: (compact: boolean, panels?: CompactPanels) => void;
+  getOpenFilesInExistingPlayer?: () => Promise<boolean>;
+  setOpenFilesInExistingPlayer?: (enabled: boolean) => Promise<boolean>;
+  onOpenFiles?: (listener: (files: { name: string; url: string }[]) => void) => () => void;
+};
 
 declare global {
   interface Window {
-    cadenceWindow?: {
-      minimize: () => void;
-      close: () => void;
-    };
+    cadenceWindow?: DesktopWindowControls;
   }
 }
 
-const VIEW_INDEX: Record<View, number> = { player: 0, eq: 1, playlist: 2 };
+const VIEW_INDEX: Record<CadenceView, number> = { player: 0, eq: 1, playlist: 2 };
 const EQ_PROFILES = Object.entries(PRESETS);
 const subscribeToWindowControls = () => () => {};
 
@@ -64,19 +78,67 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
   const cycleRepeat = useDesk((s) => s.cycleRepeat);
   const transitionSpeed = useDesk((s) => s.transitionSpeed);
   const [dragOver, setDragOver] = useState(false);
-  const [view, setView] = useState<View>("player");
+  const [view, setView] = useState<CadenceView>("player");
+  const [compact, setCompact] = useState(false);
+  const [compactPanels, setCompactPanels] = useState<CompactPanels>({ equalizer: false, playlist: false });
   const fileRef = useRef<HTMLInputElement>(null);
+  const fileActionRef = useRef<"open" | "queue">("open");
   const navRef = useRef<HTMLElement>(null);
   const settingsRef = useRef<HTMLDetailsElement>(null);
+  const compactToggleRef = useRef<HTMLButtonElement>(null);
+  const compactPanelButtons = useRef<Partial<Record<keyof CompactPanels, HTMLButtonElement | null>>>({});
+  const desktopImports = useRef(Promise.resolve());
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
 
-  const switchView = useCallback((target: View) => {
+  useEffect(() => {
+    return windowControls?.onOpenFiles?.((openedFiles) => {
+      desktopImports.current = desktopImports.current.then(async () => {
+        const files: File[] = [];
+        for (const { name, url } of openedFiles) {
+          try {
+            const response = await fetch(url);
+            if (!response.ok) continue;
+            const blob = await response.blob();
+            files.push(new File([blob], name, { type: blob.type }));
+          } catch {
+            // Other files in the selection may still open successfully.
+          }
+        }
+        if (files.length) await addFiles(files);
+        if (files.length < openedFiles.length && !useDesk.getState().error) {
+          useDesk.setState({ error: "Cadence couldn’t open some of the selected audio files." });
+        }
+      });
+    });
+  }, [addFiles, windowControls]);
+
+  useEffect(() => {
+    windowControls?.setCompactMode?.(compact, compactPanels);
+  }, [compact, compactPanels, windowControls]);
+
+  const switchView = useCallback((target: CadenceView) => {
     setView((current) => current === target && target !== "player" ? "player" : target);
     if (settingsRef.current) settingsRef.current.open = false;
   }, []);
+
+  const changeCompactMode = useCallback((enabled: boolean) => {
+    setCompact(enabled);
+    if (settingsRef.current) settingsRef.current.open = false;
+    compactToggleRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  function setCompactPanel(panel: keyof CompactPanels, open: boolean) {
+    setCompactPanels((current) => ({ ...current, [panel]: open }));
+    if (!open) compactPanelButtons.current[panel]?.focus({ preventScroll: true });
+  }
+
+  function chooseAudio(action: "open" | "queue") {
+    fileActionRef.current = action;
+    fileRef.current?.click();
+  }
 
   useEffect(() => {
     const focused = document.activeElement;
@@ -93,6 +155,8 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
         if (settingsRef.current?.open) {
           settingsRef.current.open = false;
           settingsRef.current.querySelector("summary")?.focus();
+        } else if (compact) {
+          changeCompactMode(false);
         } else {
           switchView("player");
         }
@@ -124,24 +188,26 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
         toggleShuffle();
       } else if (event.key === "r") {
         cycleRepeat();
-      } else if (event.key === "e" && !event.repeat) {
+      } else if (!compact && event.key === "e" && !event.repeat) {
         switchView("eq");
-      } else if (event.key === "p" && !event.repeat) {
+      } else if (!compact && event.key === "p" && !event.repeat) {
         switchView("playlist");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [cycleRepeat, next, prev, seek, setVolume, switchView, toggle, toggleMute, toggleShuffle]);
+  }, [changeCompactMode, compact, cycleRepeat, next, prev, seek, setVolume, switchView, toggle, toggleMute, toggleShuffle]);
 
   const deskLayout = desktopLayout ? "bg-panel" : "mx-auto max-w-[34rem] px-2 py-3 sm:px-4 sm:py-6";
   const panelFrame = desktopLayout ? "" : "rounded-lg border border-line shadow-2xl";
   const dropOutlineOffset = desktopLayout ? "-outline-offset-2" : "outline-offset-2";
+  const compactToggleLabel = compact ? "Expand player" : "Compact mode";
+  const compactStatus = error ?? (busy || !ready ? "Working the library…" : undefined);
 
   return (
     <main
       data-transition-speed={transitionSpeed}
-      className={`flex h-dvh w-full flex-col overflow-hidden ${deskLayout}`}
+      className={`flex w-full flex-col overflow-hidden ${!compact || desktopLayout ? "h-dvh" : ""} ${deskLayout}`}
       onDragOver={(event) => {
         event.preventDefault();
         setDragOver(true);
@@ -154,12 +220,44 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
       }}
     >
       <div className={`flex min-h-0 flex-1 flex-col overflow-hidden bg-panel ${panelFrame} ${dragOver ? `outline outline-2 outline-copper ${dropOutlineOffset}` : ""}`}>
-        <header className={`flex h-12 shrink-0 items-center gap-2 border-b border-line bg-raised px-3 ${desktopLayout ? "cadence-titlebar" : ""}`}>
+        <header className={`relative flex shrink-0 items-center gap-2 border-b border-line bg-raised px-3 ${compact ? "h-9" : "h-12"} ${desktopLayout ? "cadence-titlebar" : ""}`}>
           <span className="size-2 shrink-0 rounded-full bg-copper" aria-hidden="true" />
           <h1 className="font-mono text-sm tracking-[0.18em] text-fg">CADENCE</h1>
           <div className="cadence-titlebar-controls ml-auto flex shrink-0 items-center gap-2">
-            <FinishToggle />
-            <AppearanceMenu refElement={settingsRef} />
+            {compact ? (
+              <div role="group" aria-label="Compact panels" className="flex items-center gap-1">
+                {COMPACT_PANELS.map(({ key, label, short }) => (
+                  <button
+                    key={key}
+                    ref={(button) => { compactPanelButtons.current[key] = button; }}
+                    type="button"
+                    aria-label={label}
+                    aria-controls={`compact-${key}`}
+                    aria-expanded={compactPanels[key]}
+                    title={label}
+                    onClick={() => setCompactPanel(key, !compactPanels[key])}
+                    className="h-7 w-8 rounded-sm border border-line bg-panel font-mono text-[11px] text-muted hover:text-fg aria-expanded:border-copper aria-expanded:text-copper"
+                  >
+                    {short}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <>
+                <FinishToggle />
+                <PlayerSettings refElement={settingsRef} windowControls={windowControls} />
+              </>
+            )}
+            <button
+              ref={compactToggleRef}
+              type="button"
+              aria-label={compactToggleLabel}
+              title={compactToggleLabel}
+              onClick={() => changeCompactMode(!compact)}
+              className={`flex ${compact ? "size-7" : "size-9 border border-line"} items-center justify-center rounded-sm text-muted hover:bg-panel hover:text-fg`}
+            >
+              {compact ? <PanelTopOpen className="size-4" aria-hidden="true" /> : <PanelTopClose className="size-4" aria-hidden="true" />}
+            </button>
             {windowControls && (
               <div role="group" aria-label="Window controls" className="flex items-center border-l border-line pl-1">
                 <button type="button" aria-label="Minimize window" title="Minimize" onClick={windowControls.minimize} className="flex size-7 items-center justify-center rounded-sm text-muted hover:bg-panel hover:text-fg">
@@ -173,69 +271,72 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
           </div>
         </header>
 
-        <nav ref={navRef} aria-label="Player views" className="flex shrink-0 gap-1 border-b border-line bg-lcd px-2 pt-2">
-          {(["player", "eq", "playlist"] as const).map((target) => (
-            <button
-              key={target}
-              type="button"
-              aria-controls={`view-${target}`}
-              aria-pressed={view === target}
-              onClick={() => switchView(target)}
-              className={`min-h-10 flex-1 border-b-2 px-1 font-mono text-xs uppercase tracking-widest transition-colors ${view === target ? "border-copper text-copper" : "border-transparent text-muted hover:text-fg"}`}
-            >
-              {target === "eq" ? "EQ" : target}
-            </button>
-          ))}
-        </nav>
+        {compact ? (
+          <>
+            <Transport compact status={compactStatus} />
+            <div className="min-h-0 overflow-y-auto">
+              {COMPACT_PANELS.map(({ key, label }) => (
+                <CompactPanel key={key} panel={key} label={label} open={compactPanels[key]} onClose={() => setCompactPanel(key, false)}>
+                  {key === "equalizer" ? <Equalizer /> : <Playlist onAdd={() => chooseAudio("queue")} />}
+                </CompactPanel>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <nav ref={navRef} aria-label="Player views" className="flex shrink-0 gap-1 border-b border-line bg-lcd px-2 pt-2">
+              {(["player", "eq", "playlist"] as const).map((target) => (
+                <button
+                  key={target}
+                  type="button"
+                  aria-controls={`view-${target}`}
+                  aria-pressed={view === target}
+                  onClick={() => switchView(target)}
+                  className={`min-h-10 flex-1 border-b-2 px-1 font-mono text-xs uppercase tracking-widest transition-colors ${view === target ? "border-copper text-copper" : "border-transparent text-muted hover:text-fg"}`}
+                >
+                  {CADENCE_VIEWS[target].label}
+                </button>
+              ))}
+            </nav>
 
-        <div className="cadence-viewport min-h-0 flex-1 overflow-clip bg-panel">
-          <div className="cadence-view-track flex h-full" style={{ transform: `translateX(-${VIEW_INDEX[view] * 100}%)` }}>
-            <section id="view-player" aria-hidden={view !== "player"} inert={view !== "player"} className="cadence-view">
-              <div className="mb-4 border-b border-line pb-3">
-                <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-copper">01 / Transport</p>
-                <h2 className="mt-1 text-2xl font-semibold">Player</h2>
+            <div className="cadence-viewport min-h-0 flex-1 overflow-clip bg-panel">
+              <div className="cadence-view-track flex h-full" style={{ transform: `translateX(-${VIEW_INDEX[view] * 100}%)` }}>
+                <section id="view-player" aria-hidden={view !== "player"} inert={view !== "player"} className="cadence-view">
+                  <ViewTitle view="player" active={view === "player"} />
+                  <Transport
+                    onToggleEq={() => switchView("eq")}
+                    onTogglePl={() => switchView("playlist")}
+                    onOpen={() => chooseAudio("open")}
+                  />
+                  <p className="mt-auto pt-5 font-mono text-xs text-muted">Drop audio anywhere on the desk to open it.</p>
+                </section>
+
+                <section id="view-eq" aria-label="Equalizer" aria-hidden={view !== "eq"} inert={view !== "eq"} className="cadence-view">
+                  <ViewTitle view="eq" active={view === "eq"} />
+                  <Equalizer />
+                </section>
+
+                <section id="view-playlist" aria-hidden={view !== "playlist"} inert={view !== "playlist"} className="cadence-view">
+                  <ViewTitle view="playlist" active={view === "playlist"} />
+                  <Playlist onAdd={() => chooseAudio("queue")} />
+                </section>
               </div>
-              <Transport
-                onToggleEq={() => switchView("eq")}
-                onTogglePl={() => switchView("playlist")}
-                onOpen={() => fileRef.current?.click()}
-              />
-              <p className="mt-auto pt-5 font-mono text-xs text-muted">Drop audio anywhere on the desk to add it.</p>
-            </section>
-
-            <section id="view-eq" aria-label="Equalizer" aria-hidden={view !== "eq"} inert={view !== "eq"} className={`cadence-view ${view === "eq" ? "is-active" : ""}`}>
-              <div className={`eq-mark mb-5 border-b border-line pb-3 ${view === "eq" ? "is-active" : ""}`}>
-                <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-copper">02 / Sound</p>
-                <div className="relative inline-flex items-center py-1" aria-label="Equalizer">
-                  <span className="eq-note eq-note-left" aria-hidden="true">♪</span>
-                  <h2 className="eq-wordmark">EQ</h2>
-                  <span className="eq-note eq-note-right" aria-hidden="true">♫</span>
-                </div>
-                <p className="text-sm text-muted">Shape the sound with ten live bands.</p>
-              </div>
-              <div className="eq-controls"><Equalizer /></div>
-            </section>
-
-            <section id="view-playlist" aria-hidden={view !== "playlist"} inert={view !== "playlist"} className="cadence-view">
-              <div className="mb-4 border-b border-line pb-3">
-                <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-copper">03 / Queue</p>
-                <h2 className="mt-1 text-2xl font-semibold">Playlist</h2>
-              </div>
-              <Playlist />
-            </section>
-          </div>
-        </div>
-      </div>
-
-      <div className={desktopLayout ? "shrink-0 px-4 [&>p:last-child]:pb-2" : "shrink-0"}>
-        {(busy || !desktopLayout) && (
-          <p className="mt-2 font-mono text-xs text-muted">
-            {busy ? "Working the library…" : "One desk · E for EQ · P for playlist · Esc for player"}
-          </p>
+            </div>
+          </>
         )}
-        {error ? <p className="mt-1 text-sm text-copper">{error}</p> : null}
-        {!ready ? <p className="mt-1 text-sm text-muted">Opening the desk…</p> : null}
       </div>
+
+      {!compact && (
+        <div className={desktopLayout ? "shrink-0 px-4 [&>p:last-child]:pb-2" : "shrink-0"}>
+          {(busy || !desktopLayout) && (
+            <p className="mt-2 font-mono text-xs text-muted">
+              {busy ? "Working the library…" : "One desk · E for EQ · P for playlist · Esc for player"}
+            </p>
+          )}
+          {error ? <p className="mt-1 text-sm text-copper">{error}</p> : null}
+          {!ready ? <p className="mt-1 text-sm text-muted">Opening the desk…</p> : null}
+        </div>
+      )}
 
       <input
         ref={fileRef}
@@ -245,7 +346,7 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
         className="hidden"
         onChange={(event) => {
           const list = event.target.files;
-          if (list) void addFiles([...list]);
+          if (list?.length) void addFiles([...list], fileActionRef.current);
           event.target.value = "";
         }}
       />
@@ -253,15 +354,127 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
   );
 }
 
-function AppearanceMenu({ refElement }: { refElement: RefObject<HTMLDetailsElement | null> }) {
+function CompactPanel({
+  panel,
+  label,
+  open,
+  onClose,
+  children,
+}: {
+  panel: keyof CompactPanels;
+  label: string;
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      id={`compact-${panel}`}
+      aria-label={label}
+      hidden={!open}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          onClose();
+        }
+      }}
+    >
+      {open && (
+        <div className={`flex flex-col border-t border-line ${panel === "equalizer" ? "h-[232px]" : "h-[252px]"}`}>
+          <div className="flex h-9 shrink-0 items-center justify-between border-b border-line bg-raised px-3">
+            <h2 className="font-mono text-xs uppercase tracking-wider text-fg">{label}</h2>
+            <button
+              type="button"
+              aria-label={`Close ${label.toLowerCase()}`}
+              title={`Close ${label.toLowerCase()}`}
+              className="flex size-7 items-center justify-center rounded-sm text-muted hover:bg-panel hover:text-fg"
+              onClick={onClose}
+            >
+              <X className="size-3.5" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col px-3 py-2">{children}</div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PlayerSettings({
+  refElement,
+  windowControls,
+}: {
+  refElement: RefObject<HTMLDetailsElement | null>;
+  windowControls?: DesktopWindowControls;
+}) {
+  const playOpenedFiles = useDesk((s) => s.playOpenedFiles);
+  const setPlayOpenedFiles = useDesk((s) => s.setPlayOpenedFiles);
+  const queueOpenedFiles = useDesk((s) => s.queueOpenedFiles);
+  const setQueueOpenedFiles = useDesk((s) => s.setQueueOpenedFiles);
   const transitionSpeed = useDesk((s) => s.transitionSpeed);
   const setTransitionSpeed = useDesk((s) => s.setTransitionSpeed);
+  const { getOpenFilesInExistingPlayer, setOpenFilesInExistingPlayer } = windowControls ?? {};
+  const [reuseWindow, setReuseWindow] = useState<boolean | null>(null);
+  const [reusePending, setReusePending] = useState(false);
+  const [reuseError, setReuseError] = useState("");
+
+  async function syncFileWindowSetting(enabled?: boolean) {
+    if (!getOpenFilesInExistingPlayer || !setOpenFilesInExistingPlayer || reusePending) return;
+    setReusePending(true);
+    setReuseError("");
+    try {
+      const current = enabled === undefined
+        ? await getOpenFilesInExistingPlayer()
+        : await setOpenFilesInExistingPlayer(enabled);
+      setReuseWindow(current);
+    } catch {
+      setReuseError(enabled === undefined ? "Couldn’t read the file setting." : "Couldn’t save the file setting.");
+    } finally {
+      setReusePending(false);
+    }
+  }
+
   return (
-    <details ref={refElement} className="relative z-10">
-      <summary aria-label="Appearance settings" title="Appearance settings" className="flex size-9 list-none items-center justify-center rounded-sm border border-line text-muted hover:text-fg [&::-webkit-details-marker]:hidden">
+    <details ref={refElement} className="z-10" onToggle={(event) => {
+      if (event.currentTarget.open) void syncFileWindowSetting();
+    }}>
+      <summary aria-label="Player settings" title="Player settings" className="flex size-9 list-none items-center justify-center rounded-sm border border-line text-muted hover:text-fg [&::-webkit-details-marker]:hidden">
         <Settings2 className="size-4" />
       </summary>
-      <div className="absolute right-0 top-10 w-64 rounded-md border border-line bg-raised p-4 shadow-xl">
+      <div className="absolute right-3 top-full max-h-[calc(100dvh-4rem)] w-72 max-w-[calc(100%-1.5rem)] overflow-y-auto rounded-md border border-line bg-raised p-4 shadow-xl">
+        <p className="mb-2 font-mono text-xs uppercase tracking-widest text-copper">Opening files</p>
+        {getOpenFilesInExistingPlayer && setOpenFilesInExistingPlayer && (
+          <label className="flex min-h-9 items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 shrink-0 accent-copper"
+              disabled={reusePending || reuseWindow === null}
+              checked={reuseWindow ?? true}
+              onChange={(event) => void syncFileWindowSetting(event.currentTarget.checked)}
+            />
+            Open files in existing player
+          </label>
+        )}
+        {reuseError && <p role="status" className="text-xs text-copper">{reuseError}</p>}
+        <label className="flex min-h-9 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="size-4 shrink-0 accent-copper"
+            checked={playOpenedFiles}
+            onChange={(event) => setPlayOpenedFiles(event.currentTarget.checked)}
+          />
+          Play opened files immediately
+        </label>
+        <label className="mb-4 flex min-h-9 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="size-4 shrink-0 accent-copper"
+            checked={queueOpenedFiles}
+            onChange={(event) => setQueueOpenedFiles(event.currentTarget.checked)}
+          />
+          Automatically add opened files to the playlist
+        </label>
+        <div className="mb-4 border-t border-line" />
         <p className="mb-3 font-mono text-xs uppercase tracking-widest text-copper">Appearance</p>
         <label htmlFor="transition-speed" className="block text-sm font-medium">Transition speed</label>
         <p className="mb-2 text-xs leading-5 text-muted">Choose how quickly Cadence moves between Player, Playlist, and EQ.</p>
@@ -303,17 +516,20 @@ function FinishToggle() {
   );
 }
 
-function Transport({
-  onOpen,
-  onToggleEq,
-  onTogglePl,
-}: {
+type TransportProps = { compact: true; status?: string } | {
+  compact?: false;
   onOpen: () => void;
   onToggleEq: () => void;
   onTogglePl: () => void;
-}) {
-  const tracks = useDesk((s) => s.tracks);
-  const currentId = useDesk((s) => s.currentId);
+};
+
+function Transport(props: TransportProps) {
+  const [volumeOpen, setVolumeOpen] = useState(false);
+  const volumePanelId = useId();
+  const volumeButtonRef = useRef<HTMLButtonElement>(null);
+  const current = useDesk((s) =>
+    s.openedTracks.find((track) => track.id === s.currentId) ?? s.tracks.find((track) => track.id === s.currentId),
+  );
   const playing = useDesk((s) => s.playing);
   const currentTime = useDesk((s) => s.currentTime);
   const duration = useDesk((s) => s.duration);
@@ -329,8 +545,109 @@ function Transport({
   const toggleMute = useDesk((s) => s.toggleMute);
   const toggleShuffle = useDesk((s) => s.toggleShuffle);
   const cycleRepeat = useDesk((s) => s.cycleRepeat);
-  const current = tracks.find((track) => track.id === currentId);
   const shownDuration = duration || current?.duration || 0;
+  const position = Math.min(currentTime, shownDuration || 0);
+  const volumePercent = Math.round((muted ? 0 : volume) * 100);
+
+  const playbackButtons = (
+    <>
+      <IconButton compact={props.compact} label="Previous" onClick={() => void prev()}>
+        <SkipBack />
+      </IconButton>
+      <IconButton compact={props.compact} label={playing ? "Pause" : "Play"} onClick={() => void toggle()} primary>
+        {playing ? <Pause /> : <Play />}
+      </IconButton>
+      <IconButton
+        compact={props.compact}
+        label="Stop"
+        onClick={() => {
+          engine.pause();
+          engine.seek(0);
+          useDesk.setState({ playing: false, currentTime: 0 });
+        }}
+      >
+        <Square />
+      </IconButton>
+      <IconButton compact={props.compact} label="Next" onClick={() => void next()}>
+        <SkipForward />
+      </IconButton>
+    </>
+  );
+
+  if (props.compact) {
+    const title = props.status ?? current?.title ?? "Nothing queued";
+    return (
+      <div
+        className="flex h-[68px] shrink-0 items-center gap-2 bg-panel px-2"
+        onKeyDown={(event) => {
+          if (volumeOpen && event.key === "Escape" && !event.defaultPrevented) {
+            event.preventDefault();
+            setVolumeOpen(false);
+            volumeButtonRef.current?.focus({ preventScroll: true });
+          }
+        }}
+      >
+        <div className="relative h-12 min-w-0 flex-1 overflow-hidden rounded-sm border border-line bg-lcd">
+          <div hidden={volumeOpen} className="px-2 py-1.5">
+            <p className="truncate text-sm leading-tight text-fg" title={title} role={props.status ? "status" : undefined}>
+              {title}
+            </p>
+            <p className="font-mono text-[11px] leading-4 tabular-nums text-muted">
+              <span className="text-copper">{formatTime(currentTime)}</span>
+              {shownDuration > 0 && ` / ${formatTime(shownDuration)}`}
+            </p>
+            <progress className="cadence-compact-progress" aria-label="Playback progress" value={position} max={shownDuration || 1} />
+          </div>
+          <div id={volumePanelId} hidden={!volumeOpen}>
+            {volumeOpen && (
+              <div className="flex h-[46px] items-center gap-1.5 px-2">
+                <button
+                  type="button"
+                  className="flex size-7 shrink-0 items-center justify-center rounded-sm text-muted hover:bg-panel hover:text-fg"
+                  aria-label={muted ? "Unmute" : "Mute"}
+                  title={muted ? "Unmute" : "Mute"}
+                  onClick={toggleMute}
+                >
+                  {muted ? <VolumeX className="size-4" aria-hidden="true" /> : <Volume2 className="size-4" aria-hidden="true" />}
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="flex justify-between gap-1 font-mono text-[10px] leading-3 text-muted" aria-hidden="true">
+                    <span>VOL</span>
+                    <span className="tabular-nums text-copper">{volumePercent}%</span>
+                  </div>
+                  <input
+                    autoFocus
+                    type="range"
+                    className="vol block"
+                    aria-label="Volume"
+                    aria-valuetext={`${volumePercent}%`}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={muted ? 0 : volume}
+                    onChange={(event) => setVolume(Number(event.currentTarget.value))}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Playback controls">
+          {playbackButtons}
+          <IconButton
+            ref={volumeButtonRef}
+            compact
+            label="Volume controls"
+            expanded={volumeOpen}
+            controls={volumePanelId}
+            onClick={() => setVolumeOpen(!volumeOpen)}
+          >
+            {muted || volume === 0 ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+          </IconButton>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -349,32 +666,14 @@ function Transport({
         min={0}
         max={shownDuration || 0}
         step={0.1}
-        value={Math.min(currentTime, shownDuration || 0)}
+        value={position}
         aria-label="Position"
         disabled={!shownDuration}
         onChange={(event) => seek(Number(event.target.value))}
       />
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <IconButton label="Previous" onClick={() => void prev()}>
-          <SkipBack />
-        </IconButton>
-        <IconButton label={playing ? "Pause" : "Play"} onClick={() => void toggle()} primary>
-          {playing ? <Pause /> : <Play />}
-        </IconButton>
-        <IconButton
-          label="Stop"
-          onClick={() => {
-            engine.pause();
-            engine.seek(0);
-            useDesk.setState({ playing: false, currentTime: 0 });
-          }}
-        >
-          <Square />
-        </IconButton>
-        <IconButton label="Next" onClick={() => void next()}>
-          <SkipForward />
-        </IconButton>
+        {playbackButtons}
         <IconButton label={shuffle ? "Shuffle on" : "Shuffle off"} pressed={shuffle} onClick={toggleShuffle}>
           <Shuffle />
         </IconButton>
@@ -385,13 +684,13 @@ function Transport({
         >
           {repeat === "one" ? <Repeat1 /> : <Repeat />}
         </IconButton>
-        <IconButton label="Open equalizer" onClick={onToggleEq}>
+        <IconButton label="Open equalizer" onClick={props.onToggleEq}>
           <span className="font-mono text-[11px] tracking-wide">EQ</span>
         </IconButton>
-        <IconButton label="Open playlist" onClick={onTogglePl}>
+        <IconButton label="Open playlist" onClick={props.onTogglePl}>
           <span className="font-mono text-[11px] tracking-wide">PL</span>
         </IconButton>
-        <IconButton label="Add audio" onClick={onOpen}>
+        <IconButton label="Open audio" onClick={props.onOpen}>
           <Upload />
         </IconButton>
       </div>
@@ -421,21 +720,32 @@ function IconButton({
   children,
   pressed,
   primary,
+  compact,
+  expanded,
+  controls,
+  ref,
 }: {
   label: string;
   onClick: () => void;
   children: ReactNode;
   pressed?: boolean;
   primary?: boolean;
+  compact?: boolean;
+  expanded?: boolean;
+  controls?: string;
+  ref?: RefObject<HTMLButtonElement | null>;
 }) {
   return (
     <button
+      ref={ref}
       type="button"
       aria-label={label}
       aria-pressed={pressed}
+      aria-expanded={expanded}
+      aria-controls={controls}
       title={label}
       onClick={onClick}
-      className={`inline-flex h-10 w-10 items-center justify-center rounded-sm border border-line [&_svg]:size-4 ${primary ? "bg-copper text-lcd" : pressed ? "bg-raised text-copper" : "bg-raised text-fg"}`}
+      className={`inline-flex h-10 ${compact ? "w-9 hover:border-copper sm:w-10" : "w-10"} items-center justify-center rounded-sm border border-line [&_svg]:size-4 ${primary ? "bg-copper text-lcd" : pressed || expanded ? "bg-raised text-copper" : "bg-raised text-fg"}`}
     >
       {children}
     </button>
@@ -590,19 +900,34 @@ function VSlider({
   );
 }
 
-function Playlist() {
+function Playlist({ onAdd }: { onAdd: () => void }) {
+  const [confirmClear, setConfirmClear] = useState(false);
+  const filterRef = useRef<HTMLInputElement>(null);
+  const clearButtonRef = useRef<HTMLButtonElement>(null);
   const tracks = useDesk((s) => s.tracks);
   const currentId = useDesk((s) => s.currentId);
   const query = useDesk((s) => s.query);
   const setQuery = useDesk((s) => s.setQuery);
   const playId = useDesk((s) => s.playId);
   const remove = useDesk((s) => s.remove);
+  const clearPlaylist = useDesk((s) => s.clearPlaylist);
+  const busy = useDesk((s) => s.busy);
   const shown = tracks.filter((track) => track.title.toLowerCase().includes(query.trim().toLowerCase()));
+
+  useEffect(() => {
+    if (tracks.length === 0) setConfirmClear(false);
+  }, [tracks.length]);
+
+  function cancelClear() {
+    setConfirmClear(false);
+    clearButtonRef.current?.focus({ preventScroll: true });
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="mb-2 flex items-center gap-2">
         <input
+          ref={filterRef}
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -611,10 +936,62 @@ function Playlist() {
           className="min-h-9 min-w-0 flex-1 rounded-sm border border-line px-2 text-sm"
         />
         <span className="font-mono text-xs text-muted">{tracks.length}</span>
+        <button
+          type="button"
+          aria-label="Add to playlist"
+          title="Add to playlist"
+          onClick={onAdd}
+          className="flex size-9 shrink-0 items-center justify-center rounded-sm border border-line text-muted hover:text-fg"
+        >
+          <Upload className="size-3.5" aria-hidden="true" />
+        </button>
+        <button
+          ref={clearButtonRef}
+          type="button"
+          disabled={!tracks.length || busy}
+          aria-expanded={confirmClear}
+          onClick={() => confirmClear ? cancelClear() : setConfirmClear(true)}
+          className="min-h-9 shrink-0 rounded-sm border border-line px-2 text-xs text-muted hover:text-fg disabled:opacity-40"
+        >
+          Clear playlist
+        </button>
       </div>
+      {confirmClear && tracks.length > 0 && (
+        <div
+          role="group"
+          aria-label="Confirm clearing playlist"
+          className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-sm border border-line bg-raised px-2 py-2"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              cancelClear();
+            }
+          }}
+        >
+          <p className="text-xs text-fg">Remove all {tracks.length} {tracks.length === 1 ? "track" : "tracks"}?</p>
+          <div className="flex items-center gap-1.5">
+            <button autoFocus type="button" onClick={cancelClear} className="min-h-8 rounded-sm border border-line px-2 text-xs text-muted hover:text-fg">
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                if (await clearPlaylist()) {
+                  setConfirmClear(false);
+                  filterRef.current?.focus({ preventScroll: true });
+                }
+              }}
+              className="min-h-8 rounded-sm bg-copper px-2 text-xs font-semibold text-lcd disabled:opacity-40"
+            >
+              Clear all tracks
+            </button>
+          </div>
+        </div>
+      )}
       {shown.length === 0 ? (
         <p className="px-1 py-4 text-sm text-muted">
-          {tracks.length === 0 ? "Drop audio onto the desk, or use the upload button." : "Nothing matches that filter."}
+          {tracks.length === 0 ? "Use Add to playlist to queue audio files." : "Nothing matches that filter."}
         </p>
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto">

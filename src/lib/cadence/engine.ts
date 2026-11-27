@@ -84,24 +84,35 @@ class DeskEngine {
     this.master.gain.value = muted ? 0 : Math.min(1, Math.max(0, volume));
   }
 
-  async loadAndPlay(blob: Blob) {
+  load(blob: Blob) {
     this.ensure();
     const audio = this.audio;
-    const ctx = this.ctx;
-    if (!audio || !ctx) return;
+    if (!audio) return;
+    audio.pause();
     if (this.url) URL.revokeObjectURL(this.url);
     this.url = URL.createObjectURL(blob);
     audio.src = this.url;
+  }
+
+  async loadAndPlay(blob: Blob) {
+    this.load(blob);
+    const url = this.url;
+    const audio = this.audio;
+    const ctx = this.ctx;
+    if (!audio || !ctx) return;
     await ctx.resume();
+    if (this.url !== url) return;
     await audio.play();
   }
 
   async toggle() {
+    const url = this.url;
     this.ensure();
     const audio = this.audio;
     const ctx = this.ctx;
     if (!audio || !ctx || !audio.src) return false;
     await ctx.resume();
+    if (this.url !== url) return false;
     if (audio.paused) {
       await audio.play();
       return true;
@@ -118,6 +129,14 @@ class DeskEngine {
 
   pause() {
     this.audio?.pause();
+  }
+
+  unload() {
+    this.audio?.pause();
+    this.audio?.removeAttribute("src");
+    this.audio?.load();
+    if (this.url) URL.revokeObjectURL(this.url);
+    this.url = null;
   }
 
   playing() {

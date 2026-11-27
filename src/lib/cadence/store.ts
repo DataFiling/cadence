@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { deleteTrack, getTrackBlob, listTracks, putTrack } from "./db";
+import { clearTracks, deleteTrack, getTrackBlob, listTracks, putTrack } from "./db";
 import { makeDemos } from "./demos";
 import { engine } from "./engine";
 import {
@@ -9,17 +9,23 @@ import {
   type Finish,
   type RepeatMode,
   type Settings,
+  type StoredTrack,
   type TrackMeta,
   type TransitionSpeed,
 } from "./types";
 
 const SETTINGS_KEY = "cadence-settings";
+const PLAY_OPENED_FILES_KEY = "cadence-play-opened-files";
+const QUEUE_OPENED_FILES_KEY = "cadence-queue-opened-files";
+const PLAYLIST_CLEARED_KEY = "cadence-playlist-cleared";
 const SEEDED_KEY = "cadence-seeded-v2";
 
 let hydrating: Promise<void> | null = null;
 
 type DeskState = {
   tracks: TrackMeta[];
+  openedTracks: StoredTrack[];
+  openedOrder: string[];
   order: string[];
   currentId: string | null;
   playing: boolean;
@@ -32,13 +38,16 @@ type DeskState = {
   bands: number[];
   finish: Finish;
   transitionSpeed: TransitionSpeed;
+  playOpenedFiles: boolean;
+  queueOpenedFiles: boolean;
   query: string;
   ready: boolean;
   busy: boolean;
   error: string | null;
   hydrate: () => Promise<void>;
-  addFiles: (files: File[]) => Promise<void>;
+  addFiles: (files: File[], action?: "open" | "queue") => Promise<void>;
   remove: (id: string) => Promise<void>;
+  clearPlaylist: () => Promise<boolean>;
   playId: (id: string) => Promise<void>;
   toggle: () => Promise<void>;
   next: (fromEnd?: boolean) => Promise<void>;
@@ -53,6 +62,8 @@ type DeskState = {
   setQuery: (query: string) => void;
   setFinish: (finish: Finish) => void;
   setTransitionSpeed: (speed: TransitionSpeed) => void;
+  setPlayOpenedFiles: (enabled: boolean) => void;
+  setQueueOpenedFiles: (enabled: boolean) => void;
 };
 
 function loadSettings(): Settings {
@@ -92,15 +103,33 @@ function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "r
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
+function loadOpeningPreference(key: string, fallback: boolean) {
+  try {
+    const value = localStorage.getItem(key);
+    return value === null ? fallback : value === "true";
+  } catch {
+    return fallback;
+  }
+}
+
+function saveOpeningPreference(key: string, enabled: boolean) {
+  try {
+    localStorage.setItem(key, String(enabled));
+  } catch {
+    // The current window can still use the setting for this session.
+  }
+}
+
 function shuffleIds(ids: string[], currentId: string | null): string[] {
-  const rest = ids.filter((id) => id !== currentId);
+  const first = currentId && ids.includes(currentId) ? currentId : null;
+  const rest = ids.filter((id) => id !== first);
   for (let i = rest.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     const swap = rest[i]!;
     rest[i] = rest[j]!;
     rest[j] = swap;
   }
-  return currentId ? [currentId, ...rest] : rest;
+  return first ? [first, ...rest] : rest;
 }
 
 function readDuration(file: File): Promise<number> {
@@ -124,30 +153,110 @@ function readDuration(file: File): Promise<number> {
 let bound = false;
 
 export const useDesk = create<DeskState>((set, get) => {
+  let playlistWrites = Promise.resolve();
+  let playbackGeneration = 0;
   const applyAudio = () => {
     const { bands, volume, muted } = get();
     engine.setBands(bands);
     engine.setVolume(volume, muted);
   };
 
-  const playStored = async (id: string) => {
-    engine.unlock();
-    const blob = await getTrackBlob(id);
+  const playbackOrder = () => {
+    const { tracks, openedTracks, openedOrder, currentId, shuffle, order } = get();
+    if (openedTracks.some((track) => track.id === currentId)) return openedOrder;
+    return shuffle ? order : tracks.map((track) => track.id);
+  };
+
+  const playStored = async (id: string, playImmediately = true) => {
+    const generation = ++playbackGeneration;
+    if (playImmediately) engine.unlock();
+    const openedTrack = get().openedTracks.find((track) => track.id === id);
+    const blob = openedTrack?.blob ?? await getTrackBlob(id);
+    if (generation !== playbackGeneration) return;
     if (!blob) {
       set({ error: "That track is missing from the library.", playing: false });
       return;
     }
-    set({ currentId: id, error: null, playing: true });
+    if (!openedTrack) set({ openedTracks: [], openedOrder: [] });
+    set({ currentId: id, error: null, playing: playImmediately, currentTime: 0, duration: 0 });
+    if (!playImmediately) {
+      engine.load(blob);
+      return;
+    }
     try {
       await engine.loadAndPlay(blob);
-      set({ playing: true });
+      if (generation === playbackGeneration) set({ playing: true });
     } catch {
-      set({ playing: false, error: "Playback was blocked. Press play again." });
+      if (generation === playbackGeneration) set({ playing: false, error: "Playback was blocked. Press play again." });
+    }
+  };
+
+  const resetPlaylist = (tracks: TrackMeta[] = []) => {
+    playbackGeneration += 1;
+    engine.unload();
+    const ids = tracks.map((track) => track.id);
+    set({
+      tracks,
+      order: get().shuffle ? shuffleIds(ids, null) : ids,
+      openedTracks: [],
+      openedOrder: [],
+      currentId: null,
+      playing: false,
+      currentTime: 0,
+      duration: 0,
+      query: "",
+      error: null,
+    });
+  };
+
+  const importAudio = async (files: File[], playImmediately: boolean, queue: boolean) => {
+    const audioFiles = files.filter(
+      (file) => file.type.startsWith("audio/") || /\.(mp3|wav|ogg|flac|m4a|aac|webm|opus)$/i.test(file.name),
+    );
+    if (audioFiles.length === 0) {
+      set({ error: "Choose an audio file such as MP3, WAV, Ogg, FLAC, or M4A." });
+      return;
+    }
+    try {
+      await get().hydrate();
+      set({ busy: true, error: null });
+      let added = Date.now();
+      const opened: StoredTrack[] = [];
+      for (const file of audioFiles) {
+        const duration = await readDuration(file);
+        const track = {
+          id: crypto.randomUUID(),
+          title: stripExt(file.name),
+          duration,
+          added: added++,
+          blob: file,
+        };
+        if (queue) await putTrack(track);
+        opened.push(track);
+      }
+      const first = opened[0]!;
+      if (!queue) {
+        const ids = opened.map((track) => track.id);
+        set({ openedTracks: opened, openedOrder: get().shuffle ? shuffleIds(ids, first.id) : ids });
+        await playStored(first.id, playImmediately);
+        return;
+      }
+      const tracks = await listTracks();
+      const ids = tracks.map((track) => track.id);
+      const { shuffle, currentId } = get();
+      set({ tracks, order: shuffle ? shuffleIds(ids, currentId) : ids });
+      if (playImmediately) await playStored(first.id);
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "Could not add those files." });
+    } finally {
+      set({ busy: false });
     }
   };
 
   return {
     tracks: [],
+    openedTracks: [],
+    openedOrder: [],
     order: [],
     currentId: null,
     playing: false,
@@ -155,6 +264,8 @@ export const useDesk = create<DeskState>((set, get) => {
     duration: 0,
     ...DEFAULT_SETTINGS,
     bands: DEFAULT_SETTINGS.bands.slice(),
+    playOpenedFiles: true,
+    queueOpenedFiles: false,
     query: "",
     ready: false,
     busy: false,
@@ -165,6 +276,24 @@ export const useDesk = create<DeskState>((set, get) => {
       hydrating = (async () => {
       if (!bound) {
         bound = true;
+        window.addEventListener("storage", (event) => {
+          if (event.key === PLAY_OPENED_FILES_KEY) {
+            set({ playOpenedFiles: event.newValue !== "false" });
+          } else if (event.key === QUEUE_OPENED_FILES_KEY) {
+            set({ queueOpenedFiles: event.newValue === "true" });
+          } else if (event.key === PLAYLIST_CLEARED_KEY && event.newValue) {
+            playlistWrites = playlistWrites.then(async () => {
+              const tracks = await listTracks();
+              const { currentId, openedTracks, shuffle } = get();
+              if (![...tracks, ...openedTracks].some((track) => track.id === currentId)) {
+                resetPlaylist(tracks);
+              } else {
+                const ids = tracks.map((track) => track.id);
+                set({ tracks, order: shuffle ? shuffleIds(ids, currentId) : ids });
+              }
+            }).catch(() => set({ error: "Could not refresh the playlist." }));
+          }
+        });
         engine.bind(
           (currentTime, duration) => set({ currentTime, duration: duration || get().duration }),
           () => {
@@ -173,7 +302,13 @@ export const useDesk = create<DeskState>((set, get) => {
         );
       }
       const settings = loadSettings();
-      set({ ...settings, busy: true, error: null });
+      set({
+        ...settings,
+        playOpenedFiles: loadOpeningPreference(PLAY_OPENED_FILES_KEY, true),
+        queueOpenedFiles: loadOpeningPreference(QUEUE_OPENED_FILES_KEY, false),
+        busy: true,
+        error: null,
+      });
       applyAudio();
       document.documentElement.dataset.finish = settings.finish;
       try {
@@ -202,41 +337,36 @@ export const useDesk = create<DeskState>((set, get) => {
       return hydrating;
     },
 
-    addFiles: async (files) => {
-      const audioFiles = files.filter(
-        (file) => file.type.startsWith("audio/") || /\.(mp3|wav|ogg|flac|m4a|aac|webm|opus)$/i.test(file.name),
-      );
-      if (audioFiles.length === 0) {
-        set({ error: "Drop audio files — mp3, wav, ogg, flac, m4a." });
-        return;
-      }
-      set({ busy: true, error: null });
-      try {
-        let added = Date.now();
-        for (const file of audioFiles) {
-          const duration = await readDuration(file);
-          await putTrack({
-            id: crypto.randomUUID(),
-            title: stripExt(file.name),
-            duration,
-            added: added++,
-            blob: file,
-          });
+    addFiles: (files, action = "open") => {
+      const { playOpenedFiles, queueOpenedFiles } = get();
+      const playImmediately = action === "open" && playOpenedFiles;
+      const queue = action === "queue" || queueOpenedFiles;
+      if (playImmediately) engine.unlock();
+      playlistWrites = playlistWrites.then(() => importAudio(files, playImmediately, queue));
+      return playlistWrites;
+    },
+
+    clearPlaylist: () => {
+      const clearing = playlistWrites.then(async () => {
+        set({ busy: true, error: null });
+        try {
+          await clearTracks();
+          resetPlaylist();
+          try {
+            localStorage.setItem(PLAYLIST_CLEARED_KEY, crypto.randomUUID());
+          } catch {
+            // The library has already been cleared even if other windows cannot be notified.
+          }
+          return true;
+        } catch (err) {
+          set({ error: err instanceof Error ? err.message : "Could not clear the playlist." });
+          return false;
+        } finally {
+          set({ busy: false });
         }
-        const tracks = await listTracks();
-        const ids = tracks.map((track) => track.id);
-        const { shuffle, currentId } = get();
-        set({
-          tracks,
-          order: shuffle ? shuffleIds(ids, currentId) : ids,
-          busy: false,
-        });
-      } catch (err) {
-        set({
-          busy: false,
-          error: err instanceof Error ? err.message : "Could not add those files.",
-        });
-      }
+      });
+      playlistWrites = clearing.then(() => {});
+      return clearing;
     },
 
     remove: async (id) => {
@@ -257,6 +387,7 @@ export const useDesk = create<DeskState>((set, get) => {
 
     toggle: async () => {
       const { currentId, tracks, playing } = get();
+      const generation = playbackGeneration;
       if (!currentId) {
         const first = tracks[0];
         if (first) await playStored(first.id);
@@ -266,24 +397,25 @@ export const useDesk = create<DeskState>((set, get) => {
         engine.unlock();
         try {
           const nextPlaying = await engine.toggle();
+          if (generation !== playbackGeneration) return;
           if (!nextPlaying && !engine.playing()) {
             await playStored(currentId);
             return;
           }
           set({ playing: nextPlaying, error: null });
         } catch {
-          await playStored(currentId);
+          if (generation === playbackGeneration) await playStored(currentId);
         }
         return;
       }
       const nextPlaying = await engine.toggle();
-      set({ playing: nextPlaying });
+      if (generation === playbackGeneration) set({ playing: nextPlaying });
     },
 
     next: async (fromEnd = false) => {
-      const { tracks, order, shuffle, currentId, repeat } = get();
-      if (tracks.length === 0) return;
-      const ids = shuffle ? order : tracks.map((track) => track.id);
+      const { currentId, repeat } = get();
+      const ids = playbackOrder();
+      if (ids.length === 0) return;
       if (fromEnd && repeat === "one" && currentId) {
         engine.seek(0);
         await playStored(currentId);
@@ -305,13 +437,13 @@ export const useDesk = create<DeskState>((set, get) => {
     },
 
     prev: async () => {
-      const { tracks, order, shuffle, currentId, currentTime } = get();
+      const { currentId, currentTime } = get();
       if (currentTime > 3) {
         engine.seek(0);
         set({ currentTime: 0 });
         return;
       }
-      const ids = shuffle ? order : tracks.map((track) => track.id);
+      const ids = playbackOrder();
       const index = ids.indexOf(currentId ?? "");
       const previous = index > 0 ? ids[index - 1] : ids[ids.length - 1];
       if (previous) await playStored(previous);
@@ -336,10 +468,14 @@ export const useDesk = create<DeskState>((set, get) => {
     },
 
     toggleShuffle: () => {
-      const shuffle = !get().shuffle;
-      const ids = get().tracks.map((track) => track.id);
-      const order = shuffle ? shuffleIds(ids, get().currentId) : ids;
-      set({ shuffle, order });
+      const { shuffle, tracks, openedTracks, currentId } = get();
+      const playlistIds = tracks.map((track) => track.id);
+      const openedIds = openedTracks.map((track) => track.id);
+      set({
+        shuffle: !shuffle,
+        order: shuffle ? playlistIds : shuffleIds(playlistIds, currentId),
+        openedOrder: shuffle ? openedIds : shuffleIds(openedIds, currentId),
+      });
       saveSettings(get());
     },
 
@@ -376,6 +512,16 @@ export const useDesk = create<DeskState>((set, get) => {
     setTransitionSpeed: (transitionSpeed) => {
       set({ transitionSpeed });
       saveSettings(get());
+    },
+
+    setPlayOpenedFiles: (playOpenedFiles) => {
+      saveOpeningPreference(PLAY_OPENED_FILES_KEY, playOpenedFiles);
+      set({ playOpenedFiles });
+    },
+
+    setQueueOpenedFiles: (queueOpenedFiles) => {
+      saveOpeningPreference(QUEUE_OPENED_FILES_KEY, queueOpenedFiles);
+      set({ queueOpenedFiles });
     },
   };
 });

@@ -67,3 +67,17 @@ export async function deleteTrack(id: string): Promise<void> {
   });
   db.close();
 }
+
+export async function clearTracks(): Promise<void> {
+  const db = await openDb();
+  try {
+    const transaction = db.transaction(STORE, "readwrite");
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () => reject(transaction.error ?? new Error("Could not clear the playlist."));
+      transaction.objectStore(STORE).clear();
+    });
+  } finally {
+    db.close();
+  }
+}
