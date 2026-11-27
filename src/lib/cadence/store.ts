@@ -2,11 +2,11 @@ import { create } from "zustand";
 import { clearTracks, deleteTrack, getTrackBlob, listTracks, putTrack } from "./db";
 import { makeDemos } from "./demos";
 import { engine } from "./engine";
+import { applySkin, isSkinId, parseTokens, resolveTokens, type SkinId, type SkinTokens } from "./skins";
 import {
   DEFAULT_SETTINGS,
   PRESETS,
   stripExt,
-  type Finish,
   type RepeatMode,
   type Settings,
   type StoredTrack,
@@ -36,7 +36,8 @@ type DeskState = {
   shuffle: boolean;
   repeat: RepeatMode;
   bands: number[];
-  finish: Finish;
+  skin: SkinId;
+  custom: SkinTokens | null;
   transitionSpeed: TransitionSpeed;
   playOpenedFiles: boolean;
   queueOpenedFiles: boolean;
@@ -60,7 +61,8 @@ type DeskState = {
   setBand: (index: number, gain: number) => void;
   applyPreset: (name: string) => void;
   setQuery: (query: string) => void;
-  setFinish: (finish: Finish) => void;
+  setSkin: (skin: SkinId) => void;
+  paint: (key: keyof SkinTokens, value: string) => void;
   setTransitionSpeed: (speed: TransitionSpeed) => void;
   setPlayOpenedFiles: (enabled: boolean) => void;
   setQueueOpenedFiles: (enabled: boolean) => void;
@@ -70,7 +72,7 @@ function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS, bands: DEFAULT_SETTINGS.bands.slice() };
-    const parsed = JSON.parse(raw) as Partial<Settings>;
+    const parsed = JSON.parse(raw) as Partial<Settings> & { finish?: string };
     const bands = Array.isArray(parsed.bands) && parsed.bands.length === 10
       ? parsed.bands.map((n) => Number(n) || 0)
       : DEFAULT_SETTINGS.bands.slice();
@@ -80,7 +82,8 @@ function loadSettings(): Settings {
       shuffle: Boolean(parsed.shuffle),
       repeat: parsed.repeat === "all" || parsed.repeat === "one" ? parsed.repeat : "off",
       bands,
-      finish: parsed.finish === "brass" ? "brass" : "carbon",
+      skin: isSkinId(parsed.skin) ? parsed.skin : parsed.finish === "brass" ? "brass" : "carbon",
+      custom: parseTokens(parsed.custom),
       transitionSpeed: parsed.transitionSpeed === "off" || parsed.transitionSpeed === "quick" || parsed.transitionSpeed === "smooth"
         ? parsed.transitionSpeed
         : "normal",
@@ -90,14 +93,15 @@ function loadSettings(): Settings {
   }
 }
 
-function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "repeat" | "bands" | "finish" | "transitionSpeed">) {
+function saveSettings(state: Pick<DeskState, "volume" | "muted" | "shuffle" | "repeat" | "bands" | "skin" | "custom" | "transitionSpeed">) {
   const settings: Settings = {
     volume: state.volume,
     muted: state.muted,
     shuffle: state.shuffle,
     repeat: state.repeat,
     bands: state.bands,
-    finish: state.finish,
+    skin: state.skin,
+    custom: state.custom,
     transitionSpeed: state.transitionSpeed,
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -310,7 +314,7 @@ export const useDesk = create<DeskState>((set, get) => {
         error: null,
       });
       applyAudio();
-      document.documentElement.dataset.finish = settings.finish;
+      applySkin(resolveTokens(settings.skin, settings.custom));
       try {
         let tracks = await listTracks();
         if (tracks.length === 0 && !localStorage.getItem(SEEDED_KEY)) {
@@ -503,9 +507,20 @@ export const useDesk = create<DeskState>((set, get) => {
 
     setQuery: (query) => set({ query }),
 
-    setFinish: (finish) => {
-      document.documentElement.dataset.finish = finish;
-      set({ finish });
+    setSkin: (skin) => {
+      const { skin: currentSkin, custom: saved } = get();
+      const custom = skin === "custom" && !saved ? resolveTokens(currentSkin, null) : saved;
+      applySkin(resolveTokens(skin, custom));
+      set({ skin, custom });
+      saveSettings(get());
+    },
+
+    paint: (key, value) => {
+      if (!/^#[0-9a-fA-F]{6}$/.test(value)) return;
+      const { skin, custom: saved } = get();
+      const custom = { ...resolveTokens(skin, saved), [key]: value };
+      applySkin(custom);
+      set({ skin: "custom", custom });
       saveSettings(get());
     },
 

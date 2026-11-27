@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import { engine } from "@/lib/cadence/engine";
 import { useDesk } from "@/lib/cadence/store";
-import { BAND_LABELS, BANDS, PRESETS, formatTime, type Finish, type TransitionSpeed } from "@/lib/cadence/types";
+import { BAND_LABELS, BANDS, PRESETS, formatTime, type TransitionSpeed } from "@/lib/cadence/types";
+import { SkinMenu } from "./skin-menu";
 import { CADENCE_VIEWS, ViewTitle, type CadenceView } from "./view-title";
 
 type CompactPanels = { equalizer: boolean; playlist: boolean };
@@ -85,6 +86,7 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
   const fileActionRef = useRef<"open" | "queue">("open");
   const navRef = useRef<HTMLElement>(null);
   const settingsRef = useRef<HTMLDetailsElement>(null);
+  const skinsRef = useRef<HTMLDetailsElement>(null);
   const compactToggleRef = useRef<HTMLButtonElement>(null);
   const compactPanelButtons = useRef<Partial<Record<keyof CompactPanels, HTMLButtonElement | null>>>({});
   const desktopImports = useRef(Promise.resolve());
@@ -122,11 +124,13 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
   const switchView = useCallback((target: CadenceView) => {
     setView((current) => current === target && target !== "player" ? "player" : target);
     if (settingsRef.current) settingsRef.current.open = false;
+    if (skinsRef.current) skinsRef.current.open = false;
   }, []);
 
   const changeCompactMode = useCallback((enabled: boolean) => {
     setCompact(enabled);
     if (settingsRef.current) settingsRef.current.open = false;
+    if (skinsRef.current) skinsRef.current.open = false;
     compactToggleRef.current?.focus({ preventScroll: true });
   }, []);
 
@@ -152,9 +156,10 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === "Escape") {
         event.preventDefault();
-        if (settingsRef.current?.open) {
-          settingsRef.current.open = false;
-          settingsRef.current.querySelector("summary")?.focus();
+        const openMenu = [settingsRef.current, skinsRef.current].find((menu) => menu?.open);
+        if (openMenu) {
+          openMenu.open = false;
+          openMenu.querySelector("summary")?.focus();
         } else if (compact) {
           changeCompactMode(false);
         } else {
@@ -192,6 +197,9 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
         switchView("eq");
       } else if (!compact && event.key === "p" && !event.repeat) {
         switchView("playlist");
+      } else if (!compact && event.key === "k" && !event.repeat && skinsRef.current) {
+        skinsRef.current.open = !skinsRef.current.open;
+        skinsRef.current.querySelector("summary")?.focus();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -244,8 +252,12 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
               </div>
             ) : (
               <>
-                <FinishToggle />
-                <PlayerSettings refElement={settingsRef} windowControls={windowControls} />
+                <SkinMenu refElement={skinsRef} onOpen={() => {
+                  if (settingsRef.current) settingsRef.current.open = false;
+                }} />
+                <PlayerSettings refElement={settingsRef} windowControls={windowControls} onOpen={() => {
+                  if (skinsRef.current) skinsRef.current.open = false;
+                }} />
               </>
             )}
             <button
@@ -292,7 +304,7 @@ export function Desk({ desktop = false }: { desktop?: boolean }) {
                   aria-controls={`view-${target}`}
                   aria-pressed={view === target}
                   onClick={() => switchView(target)}
-                  className={`min-h-10 flex-1 border-b-2 px-1 font-mono text-xs uppercase tracking-widest transition-colors ${view === target ? "border-copper text-copper" : "border-transparent text-muted hover:text-fg"}`}
+                  className={`min-h-10 flex-1 border-b-2 px-1 font-mono text-xs uppercase tracking-widest text-lcd-ink transition-colors ${view === target ? "border-copper" : "border-transparent opacity-70 hover:opacity-100"}`}
                 >
                   {CADENCE_VIEWS[target].label}
                 </button>
@@ -403,9 +415,11 @@ function CompactPanel({
 function PlayerSettings({
   refElement,
   windowControls,
+  onOpen,
 }: {
   refElement: RefObject<HTMLDetailsElement | null>;
   windowControls?: DesktopWindowControls;
+  onOpen: () => void;
 }) {
   const playOpenedFiles = useDesk((s) => s.playOpenedFiles);
   const setPlayOpenedFiles = useDesk((s) => s.setPlayOpenedFiles);
@@ -436,7 +450,10 @@ function PlayerSettings({
 
   return (
     <details ref={refElement} className="z-10" onToggle={(event) => {
-      if (event.currentTarget.open) void syncFileWindowSetting();
+      if (event.currentTarget.open) {
+        onOpen();
+        void syncFileWindowSetting();
+      }
     }}>
       <summary aria-label="Player settings" title="Player settings" className="flex size-9 list-none items-center justify-center rounded-sm border border-line text-muted hover:text-fg [&::-webkit-details-marker]:hidden">
         <Settings2 className="size-4" />
@@ -482,7 +499,7 @@ function PlayerSettings({
           id="transition-speed"
           value={transitionSpeed}
           onChange={(event) => setTransitionSpeed(event.target.value as TransitionSpeed)}
-          className="min-h-10 w-full rounded-sm border border-line bg-lcd px-2 text-sm text-fg"
+          className="min-h-10 w-full rounded-sm border border-line bg-lcd px-2 text-sm text-lcd-ink scheme-dark"
         >
           <option value="off">Off — instant</option>
           <option value="quick">Quick — 120 ms</option>
@@ -492,27 +509,6 @@ function PlayerSettings({
         <p className="mt-2 text-xs leading-5 text-muted">Your device’s reduced motion setting turns these animations off.</p>
       </div>
     </details>
-  );
-}
-
-function FinishToggle() {
-  const finish = useDesk((s) => s.finish);
-  const setFinish = useDesk((s) => s.setFinish);
-  const options: Finish[] = ["carbon", "brass"];
-  return (
-    <div className="flex" onDoubleClick={(event) => event.stopPropagation()}>
-      {options.map((option) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={finish === option}
-          onClick={() => setFinish(option)}
-          className={`px-1.5 font-mono text-[10px] uppercase tracking-wider ${finish === option ? "text-copper" : "text-muted"}`}
-        >
-          {option}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -589,11 +585,11 @@ function Transport(props: TransportProps) {
       >
         <div className="relative h-12 min-w-0 flex-1 overflow-hidden rounded-sm border border-line bg-lcd">
           <div hidden={volumeOpen} className="px-2 py-1.5">
-            <p className="truncate text-sm leading-tight text-fg" title={title} role={props.status ? "status" : undefined}>
+            <p className="truncate text-sm leading-tight text-lcd-ink" title={title} role={props.status ? "status" : undefined}>
               {title}
             </p>
-            <p className="font-mono text-[11px] leading-4 tabular-nums text-muted">
-              <span className="text-copper">{formatTime(currentTime)}</span>
+            <p className="font-mono text-[11px] leading-4 tabular-nums text-lcd-ink">
+              <span>{formatTime(currentTime)}</span>
               {shownDuration > 0 && ` / ${formatTime(shownDuration)}`}
             </p>
             <progress className="cadence-compact-progress" aria-label="Playback progress" value={position} max={shownDuration || 1} />
@@ -603,7 +599,7 @@ function Transport(props: TransportProps) {
               <div className="flex h-[46px] items-center gap-1.5 px-2">
                 <button
                   type="button"
-                  className="flex size-7 shrink-0 items-center justify-center rounded-sm text-muted hover:bg-panel hover:text-fg"
+                  className="flex size-7 shrink-0 items-center justify-center rounded-sm text-lcd-ink opacity-75 hover:opacity-100"
                   aria-label={muted ? "Unmute" : "Mute"}
                   title={muted ? "Unmute" : "Mute"}
                   onClick={toggleMute}
@@ -611,9 +607,9 @@ function Transport(props: TransportProps) {
                   {muted ? <VolumeX className="size-4" aria-hidden="true" /> : <Volume2 className="size-4" aria-hidden="true" />}
                 </button>
                 <div className="min-w-0 flex-1">
-                  <div className="flex justify-between gap-1 font-mono text-[10px] leading-3 text-muted" aria-hidden="true">
+                  <div className="flex justify-between gap-1 font-mono text-[10px] leading-3 text-lcd-ink" aria-hidden="true">
                     <span>VOL</span>
-                    <span className="tabular-nums text-copper">{volumePercent}%</span>
+                    <span className="tabular-nums">{volumePercent}%</span>
                   </div>
                   <input
                     autoFocus
@@ -653,10 +649,10 @@ function Transport(props: TransportProps) {
     <div className="flex min-w-0 flex-col gap-3">
       <div className="rounded-sm bg-lcd px-3 py-2">
         <div className="flex items-baseline justify-between gap-3">
-          <p className="font-mono text-2xl text-copper">{formatTime(currentTime)}</p>
-          <p className="font-mono text-xs text-muted">{formatTime(shownDuration)}</p>
+          <p className="font-mono text-2xl text-lcd-ink">{formatTime(currentTime)}</p>
+          <p className="font-mono text-xs text-lcd-ink opacity-70">{formatTime(shownDuration)}</p>
         </div>
-        <p className="truncate text-sm">{current?.title ?? "Nothing queued"}</p>
+        <p className="truncate text-sm text-lcd-ink">{current?.title ?? "Nothing queued"}</p>
         <Scope active={playing} />
       </div>
 
@@ -780,8 +776,12 @@ function Scope({ active }: { active: boolean }) {
       {levels.map((level, index) => (
         <span
           key={index}
-          className="min-w-0 flex-1 bg-copper"
-          style={{ height: `${Math.max(8, level * 100)}%`, opacity: 0.35 + level * 0.65 }}
+          className="min-w-0 flex-1"
+          style={{
+            height: `${Math.max(8, level * 100)}%`,
+            opacity: 0.45 + level * 0.55,
+            background: "linear-gradient(to top, var(--vis-lo), var(--vis-hi))",
+          }}
         />
       ))}
     </div>
@@ -803,7 +803,7 @@ function Equalizer() {
         <select
           value={activeProfile}
           onChange={(event) => applyPreset(event.currentTarget.value)}
-          className="min-h-10 min-w-0 flex-1 rounded-sm border border-line bg-lcd px-2 text-sm text-fg scheme-dark"
+          className="min-h-10 min-w-0 flex-1 rounded-sm border border-line bg-lcd px-2 text-sm text-lcd-ink scheme-dark"
         >
           <option value="" disabled>Custom</option>
           {EQ_PROFILES.map(([name]) => (
@@ -994,25 +994,25 @@ function Playlist({ onAdd }: { onAdd: () => void }) {
           {tracks.length === 0 ? "Use Add to playlist to queue audio files." : "Nothing matches that filter."}
         </p>
       ) : (
-        <ul className="min-h-0 flex-1 overflow-y-auto">
+        <ul className="min-h-0 flex-1 overflow-y-auto bg-pl-bg">
           {shown.map((track, index) => {
             const active = track.id === currentId;
             return (
-              <li key={track.id} className={`flex items-center gap-1 border-t border-line ${active ? "bg-raised" : ""}`}>
+              <li key={track.id} className={`flex items-center gap-1 border-t border-line ${active ? "bg-pl-selected text-pl-current" : "text-pl"}`}>
                 <button
                   type="button"
                   onClick={() => void playId(track.id)}
-                  className={`flex min-h-10 min-w-0 flex-1 items-center gap-2 px-1 text-left text-sm ${active ? "text-copper" : "text-fg"}`}
+                  className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-1 text-left text-sm text-inherit"
                 >
-                  <span className="w-5 font-mono text-[10px] text-muted">{index + 1}</span>
+                  <span className="w-5 font-mono text-[10px] opacity-75">{index + 1}</span>
                   <span className="min-w-0 flex-1 truncate">{track.title}</span>
-                  <span className="font-mono text-[10px] text-muted">{formatTime(track.duration)}</span>
+                  <span className="font-mono text-[10px] opacity-75">{formatTime(track.duration)}</span>
                 </button>
                 <button
                   type="button"
                   aria-label={`Remove ${track.title}`}
                   onClick={() => void remove(track.id)}
-                  className="inline-flex h-10 w-8 items-center justify-center text-muted"
+                  className="inline-flex h-10 w-8 items-center justify-center opacity-75 hover:opacity-100"
                 >
                   <X className="size-3.5" />
                 </button>
